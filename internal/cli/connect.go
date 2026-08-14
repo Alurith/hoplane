@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Alurith/hoplane/internal/connector"
+	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -34,17 +35,20 @@ func (s *commandState) connect(ctx context.Context, name string, dryRun bool) er
 		return fmt.Errorf("connection %q not found", name)
 	}
 
+	return s.connectConnection(ctx, connection, connector.ConnectOptions{DryRun: dryRun})
+}
+
+func (s *commandState) connectConnection(
+	ctx context.Context,
+	connection domain.Connection,
+	options connector.ConnectOptions,
+) error {
 	streams := connector.IO{
 		Input:  s.dependencies.Input,
 		Output: s.dependencies.Output,
 		Errors: s.dependencies.Errors,
 	}
-	if err := s.registry.Connect(
-		ctx,
-		connection,
-		streams,
-		connector.ConnectOptions{DryRun: dryRun},
-	); err != nil {
+	if err := s.registry.Connect(ctx, connection, streams, options); err != nil {
 		return fmt.Errorf("connect %q: %w", connection.Name, err)
 	}
 	return nil

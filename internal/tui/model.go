@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -11,10 +12,19 @@ import (
 	"github.com/Alurith/hoplane/internal/domain"
 )
 
+type Action int
+
+const (
+	ActionNone Action = iota
+	ActionSelect
+	ActionConnect
+)
+
 type model struct {
 	list        list.Model
 	connections []domain.Connection
 	selected    *domain.Connection
+	action      Action
 	quitting    bool
 }
 
@@ -32,6 +42,11 @@ func NewModel(connections []domain.Connection) model {
 	component.Title = "Hoplane connections"
 	component.SetStatusBarItemName("connection", "connections")
 	component.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
+	component.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "connect")),
+		}
+	}
 
 	return model{
 		list:        component,
@@ -53,11 +68,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "q", "ctrl+c":
 				m.quitting = true
 				return m, tea.Quit
-			case "enter":
+			case "enter", "c":
 				item, ok := m.list.SelectedItem().(Item)
 				if ok {
 					selected := item.Connection()
 					m.selected = &selected
+					m.action = ActionSelect
+					if message.String() == "c" {
+						m.action = ActionConnect
+					}
 				}
 				return m, tea.Quit
 			}
@@ -87,7 +106,11 @@ func (m model) Selected() (domain.Connection, bool) {
 	return *m.selected, true
 }
 
-func Pick(ctx context.Context, connections []domain.Connection, input io.Reader, output io.Writer) (domain.Connection, bool, error) {
+func (m model) Action() Action {
+	return m.action
+}
+
+func Pick(ctx context.Context, connections []domain.Connection, input io.Reader, output io.Writer) (domain.Connection, Action, error) {
 	program := tea.NewProgram(
 		NewModel(connections),
 		tea.WithContext(ctx),
@@ -96,12 +119,15 @@ func Pick(ctx context.Context, connections []domain.Connection, input io.Reader,
 	)
 	finalModel, err := program.Run()
 	if err != nil {
-		return domain.Connection{}, false, err
+		return domain.Connection{}, ActionNone, err
 	}
 	result, ok := finalModel.(model)
 	if !ok {
-		return domain.Connection{}, false, nil
+		return domain.Connection{}, ActionNone, nil
 	}
 	connection, selected := result.Selected()
-	return connection, selected, nil
+	if !selected {
+		return domain.Connection{}, ActionNone, nil
+	}
+	return connection, result.Action(), nil
 }

@@ -112,14 +112,18 @@ func (s *commandState) pick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	connection, selected, err := tui.Pick(ctx, catalog.Connections, s.dependencies.Input, s.dependencies.Output)
+	connection, action, err := tui.Pick(ctx, catalog.Connections, s.dependencies.Input, s.dependencies.Output)
 	if err != nil {
 		return fmt.Errorf("run picker: %w", err)
 	}
-	if !selected {
+	switch action {
+	case tui.ActionConnect:
+		return s.connectConnection(ctx, connection, connector.ConnectOptions{})
+	case tui.ActionSelect:
+		return output.WriteConnection(s.dependencies.Output, connection)
+	default:
 		return nil
 	}
-	return output.WriteConnection(s.dependencies.Output, connection)
 }
 
 func connectionNameExists(connections []config.Entry, name string) bool {
