@@ -12,13 +12,14 @@ type File struct {
 
 // Entry is the user-facing, declarative representation of a connection.
 type Entry struct {
-	Name        string   `yaml:"name"`
-	Protocol    string   `yaml:"protocol"`
-	Host        string   `yaml:"host"`
-	Port        *uint16  `yaml:"port,omitempty"`
-	User        string   `yaml:"user,omitempty"`
-	Description string   `yaml:"description,omitempty"`
-	Tags        []string `yaml:"tags,omitempty"`
+	Name        string         `yaml:"name"`
+	Protocol    string         `yaml:"protocol"`
+	Host        string         `yaml:"host"`
+	Port        *uint16        `yaml:"port,omitempty"`
+	User        string         `yaml:"user,omitempty"`
+	Description string         `yaml:"description,omitempty"`
+	Tags        []string       `yaml:"tags,omitempty"`
+	Options     domain.Options `yaml:"options,omitempty"`
 }
 
 func NewFile() File {
@@ -35,6 +36,7 @@ func (e Entry) Candidate(source domain.SourceRef) domain.Candidate {
 		Description: e.Description,
 		Tags:        e.Tags,
 		Source:      source,
+		Options:     domain.CloneOptions(e.Options),
 	}
 }
 
@@ -48,5 +50,6 @@ func EntryFromConnection(connection domain.Connection) Entry {
 		User:        connection.Endpoint.User,
 		Description: connection.Description,
 		Tags:        connection.Tags,
+		Options:     domain.CloneOptions(connection.Options),
 	}
 }

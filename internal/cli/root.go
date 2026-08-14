@@ -23,9 +23,10 @@ type Dependencies struct {
 }
 
 type commandState struct {
-	dependencies Dependencies
-	configPath   string
-	registry     connector.Registry
+	dependencies  Dependencies
+	configPath    string
+	sshConfigPath string
+	registry      connector.Registry
 }
 
 func Execute(ctx context.Context, args []string, dependencies Dependencies) error {
@@ -49,6 +50,7 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 		RunE:          state.runPick,
 	}
 	command.PersistentFlags().StringVarP(&state.configPath, "config", "c", "", "path to the configuration file")
+	command.PersistentFlags().StringVar(&state.sshConfigPath, "ssh-config", "", "path to the OpenSSH configuration file")
 	command.AddCommand(
 		state.newAddCommand(),
 		state.newListCommand(),
@@ -68,7 +70,15 @@ func (s *commandState) loadCatalog(ctx context.Context) (catalog.Catalog, error)
 	if err != nil {
 		return catalog.Catalog{}, err
 	}
-	return catalog.Build(ctx, discovery.NewStaticSource(file, path))
+	sshPath, err := s.sshPath()
+	if err != nil {
+		return catalog.Catalog{}, err
+	}
+	return catalog.Build(
+		ctx,
+		discovery.NewStaticSource(file, path),
+		discovery.NewSSHConfigSource(sshPath),
+	)
 }
 
 func (s *commandState) path() (string, error) {
@@ -78,6 +88,17 @@ func (s *commandState) path() (string, error) {
 	path, err := config.DefaultPath()
 	if err != nil {
 		return "", fmt.Errorf("resolve config path: %w", err)
+	}
+	return path, nil
+}
+
+func (s *commandState) sshPath() (string, error) {
+	if s.sshConfigPath != "" {
+		return s.sshConfigPath, nil
+	}
+	path, err := discovery.DefaultSSHConfigPath()
+	if err != nil {
+		return "", fmt.Errorf("resolve SSH config path: %w", err)
 	}
 	return path, nil
 }

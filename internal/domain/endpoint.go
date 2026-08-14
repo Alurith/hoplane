@@ -14,6 +14,30 @@ type SourceRef struct {
 	ID   string `json:"id,omitempty"`
 }
 
+// Options is a protocol-neutral, namespaced option set. The domain preserves
+// it without interpreting the values; protocol adapters own their semantics.
+type Options map[string]map[string]string
+
+// CloneOptions returns an independent copy of an option set.
+func CloneOptions(options Options) Options {
+	if options == nil {
+		return nil
+	}
+
+	clone := make(Options, len(options))
+	for namespace, values := range options {
+		if values == nil {
+			clone[namespace] = nil
+			continue
+		}
+		clone[namespace] = make(map[string]string, len(values))
+		for key, value := range values {
+			clone[namespace][key] = value
+		}
+	}
+	return clone
+}
+
 // Candidate is a source-specific endpoint before normalization.
 type Candidate struct {
 	Name        string
@@ -24,6 +48,7 @@ type Candidate struct {
 	Description string
 	Tags        []string
 	Source      SourceRef
+	Options     Options
 }
 
 // Endpoint is the normalized, protocol-neutral target used by the catalog and
@@ -44,6 +69,7 @@ type Connection struct {
 	Description string
 	Tags        []string
 	Sources     []SourceRef
+	Options     Options
 }
 
 // NormalizeCandidate validates and normalizes a source candidate.
@@ -95,6 +121,7 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 		Description: strings.TrimSpace(candidate.Description),
 		Tags:        normalizeTags(candidate.Tags),
 		Sources:     []SourceRef{source},
+		Options:     CloneOptions(candidate.Options),
 	}, nil
 }
 

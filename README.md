@@ -10,15 +10,15 @@ discovery → normalized endpoints → picker → connector
 
 ## Current status
 
-The first vertical slice provides a local declarative catalog with:
+The first three vertical slices provide:
 
-- YAML configuration
-- `add`, `list`, and `show` commands
+- YAML configuration and a Bubble Tea picker
+- `add`, `list`, `show`, and `connect` commands
 - JSON output for automation
-- a Bubble Tea picker
 - protocol-neutral entries with SSH, RDP, VNC, and custom protocol names
-
-Connection execution is available through the SSH connector; network discovery will be added in later slices.
+- SSH execution through the local OpenSSH client
+- SSH identity files, proxy jumps, and local agent/key support
+- discovery of concrete aliases from `~/.ssh/config`
 
 ## Configuration
 
@@ -28,7 +28,7 @@ By default, hoplane reads:
 <user config directory>/hoplane/config.yaml
 ```
 
-The path can be overridden with `--config`.
+The path can be overridden with `--config`. The SSH config path can be overridden independently with `--ssh-config`.
 
 Example:
 
@@ -48,7 +48,13 @@ connections:
     protocol: ssh
     host: nas.local
     port: 22
+    options:
+      ssh:
+        identity_file: ~/.ssh/id_ed25519
+        proxy_jump: bastion
 ```
+
+SSH aliases from `~/.ssh/config` are available automatically. Use `--ssh-config` to select another OpenSSH config file. The connector delegates agent authentication, local key loading, and config semantics to the installed `ssh` client.
 
 Known default ports are SSH `22`, RDP `3389`, and VNC `5900`. Other protocols require an explicit port.
 
@@ -58,6 +64,7 @@ Known default ports are SSH `22`, RDP `3389`, and VNC `5900`. Other protocols re
 hoplane                         # open the picker
 hoplane pick                    # open the picker
 hoplane add office --protocol rdp --host desktop.example.com --user alice
+hoplane add nas --protocol ssh --host nas.local --identity-file ~/.ssh/id_ed25519 --proxy-jump bastion
 hoplane list                    # JSON output
 hoplane show office             # JSON output
 hoplane connect nas              # start the SSH client

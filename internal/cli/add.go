@@ -2,10 +2,14 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
+	"github.com/Alurith/hoplane/internal/discovery"
+	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/output"
 )
 
@@ -16,6 +20,8 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	var user string
 	var description string
 	var tags []string
+	var identityFile string
+	var proxyJump string
 
 	command := &cobra.Command{
 		Use:   "add <name>",
@@ -34,6 +40,17 @@ func (s *commandState) newAddCommand() *cobra.Command {
 			if connectionNameExists(file.Connections, name) {
 				return fmt.Errorf("connection %q already exists", name)
 			}
+			sshPath, err := s.sshPath()
+			if err != nil {
+				return err
+			}
+			sshCatalog, err := catalog.Build(cmd.Context(), discovery.NewSSHConfigSource(sshPath))
+			if err != nil {
+				return err
+			}
+			if _, exists := sshCatalog.Find(strings.TrimSpace(name)); exists {
+				return fmt.Errorf("connection %q already exists", name)
+			}
 
 			entry := config.Entry{
 				Name:        name,
@@ -43,6 +60,15 @@ func (s *commandState) newAddCommand() *cobra.Command {
 				Description: description,
 				Tags:        tags,
 			}
+			if identityFile != "" || proxyJump != "" {
+				entry.Options = domain.Options{"ssh": {}}
+				if identityFile != "" {
+					entry.Options["ssh"]["identity_file"] = identityFile
+				}
+				if proxyJump != "" {
+					entry.Options["ssh"]["proxy_jump"] = proxyJump
+				}
+			}
 			if port != 0 {
 				entry.Port = &port
 			}
@@ -50,6 +76,9 @@ func (s *commandState) newAddCommand() *cobra.Command {
 			connection, err := normalizeEntry(entry, path)
 			if err != nil {
 				return err
+			}
+			if len(entry.Options) > 0 && connection.Endpoint.Protocol != domain.ProtocolSSH {
+				return fmt.Errorf("SSH options require protocol %q", domain.ProtocolSSH)
 			}
 			file.Connections = append(file.Connections, config.EntryFromConnection(connection))
 			if err := config.Save(path, file); err != nil {
@@ -65,5 +94,7 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	flags.StringVar(&user, "user", "", "optional connection user")
 	flags.StringVar(&description, "description", "", "optional connection description")
 	flags.StringSliceVar(&tags, "tag", nil, "connection tag; may be repeated")
+	flags.StringVar(&identityFile, "identity-file", "", "SSH identity file")
+	flags.StringVar(&proxyJump, "proxy-jump", "", "SSH proxy jump target")
 	return command
 }

@@ -7,22 +7,49 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/output"
 )
 
+func TestAddPersistsSSHOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
+	if err := Execute(context.Background(), []string{
+		"add", "nas", "--config", path, "--ssh-config", sshPath,
+		"--protocol", "ssh", "--host", "nas.local",
+		"--identity-file", "~/.ssh/id_ed25519", "--proxy-jump", "bastion",
+	}, Dependencies{
+		Input:  bytes.NewBuffer(nil),
+		Output: &bytes.Buffer{},
+		Errors: &bytes.Buffer{},
+	}); err != nil {
+		t.Fatalf("add error = %v", err)
+	}
+
+	file, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	options := file.Connections[0].Options["ssh"]
+	if options["identity_file"] != "~/.ssh/id_ed25519" || options["proxy_jump"] != "bastion" {
+		t.Fatalf("options = %#v", file.Connections[0].Options)
+	}
+}
+
 func TestAddListAndShow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
+	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	var outputBuffer bytes.Buffer
 	dependencies := Dependencies{Input: bytes.NewBuffer(nil), Output: &outputBuffer, Errors: &bytes.Buffer{}}
 
 	if err := Execute(context.Background(), []string{
-		"add", "office", "--config", path, "--protocol", "rdp", "--host", "desktop.example.com", "--user", "alice",
+		"add", "office", "--config", path, "--ssh-config", sshPath, "--protocol", "rdp", "--host", "desktop.example.com", "--user", "alice",
 	}, dependencies); err != nil {
 		t.Fatalf("add error = %v", err)
 	}
 	outputBuffer.Reset()
 
-	if err := Execute(context.Background(), []string{"list", "--config", path}, dependencies); err != nil {
+	if err := Execute(context.Background(), []string{"list", "--config", path, "--ssh-config", sshPath}, dependencies); err != nil {
 		t.Fatalf("list error = %v", err)
 	}
 	var listed output.ListResponse
@@ -34,7 +61,7 @@ func TestAddListAndShow(t *testing.T) {
 	}
 
 	outputBuffer.Reset()
-	if err := Execute(context.Background(), []string{"show", "office", "--config", path}, dependencies); err != nil {
+	if err := Execute(context.Background(), []string{"show", "office", "--config", path, "--ssh-config", sshPath}, dependencies); err != nil {
 		t.Fatalf("show error = %v", err)
 	}
 	var shown output.ConnectionResponse

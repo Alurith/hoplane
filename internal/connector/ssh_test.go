@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"os"
+	"path/filepath"
+
 	"github.com/Alurith/hoplane/internal/domain"
 )
 
@@ -54,6 +57,95 @@ func TestSSHConnectorPlansInvocation(t *testing.T) {
 	want := Invocation{Program: "ssh", Args: []string{"-p", "2222", "alice@nas.local"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Plan() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSSHConnectorPlansSSHOptions(t *testing.T) {
+	connector := NewSSHConnector(&fakeRunner{})
+	connection := domain.Connection{
+		Endpoint: domain.Endpoint{
+			Protocol: domain.ProtocolSSH,
+			Host:     "nas.local",
+			Port:     2222,
+			User:     "alice",
+		},
+		Options: domain.Options{
+			"ssh": {
+				"identity_file": "/home/alice/.ssh/id_ed25519",
+				"proxy_jump":    "bastion",
+			},
+		},
+	}
+
+	got, err := connector.Plan(connection)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := Invocation{
+		Program: "ssh",
+		Args:    []string{"-i", "/home/alice/.ssh/id_ed25519", "-J", "bastion", "-p", "2222", "alice@nas.local"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Plan() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSSHConnectorPlansConfigAliasWithoutOverrides(t *testing.T) {
+	connector := NewSSHConnector(&fakeRunner{})
+	configPath := filepath.Join(t.TempDir(), "ssh", "config")
+	connection := domain.Connection{
+		Endpoint: domain.Endpoint{
+			Protocol: domain.ProtocolSSH,
+			Host:     "nas",
+			Port:     22,
+		},
+		Options: domain.Options{
+			"ssh": {
+				"config_file": configPath,
+				"host_alias":  "nas",
+			},
+		},
+	}
+
+	got, err := connector.Plan(connection)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := Invocation{Program: "ssh", Args: []string{"-F", configPath, "nas"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Plan() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSSHConnectorExpandsIdentityFileHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot resolve home directory: %v", err)
+	}
+	connector := NewSSHConnector(&fakeRunner{})
+	connection := domain.Connection{
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "nas.local", Port: 22},
+		Options:  domain.Options{"ssh": {"identity_file": "~/.ssh/id_ed25519"}},
+	}
+
+	got, err := connector.Plan(connection)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := filepath.Join(home, ".ssh", "id_ed25519")
+	if !reflect.DeepEqual(got.Args, []string{"-i", want, "-p", "22", "nas.local"}) {
+		t.Fatalf("args = %#v, want %#v", got.Args, []string{"-i", want, "-p", "22", "nas.local"})
+	}
+}
+
+func TestSSHConnectorRejectsUnknownOption(t *testing.T) {
+	connector := NewSSHConnector(&fakeRunner{})
+	_, err := connector.Plan(domain.Connection{
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "nas.local", Port: 22},
+		Options:  domain.Options{"ssh": {"unknown": "value"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `unsupported SSH option "unknown"`) {
+		t.Fatalf("Plan() error = %v, want unknown option error", err)
 	}
 }
 
@@ -104,7 +196,7 @@ func TestSSHConnectorReportsMissingClient(t *testing.T) {
 	}
 
 	err := connector.Connect(context.Background(), connection, IO{})
-	if err == nil || !strings.Contains(err.Error(), `required client "ssh" is not available`) {
+	if !errors.Is(err, ErrClientUnavailable) || !strings.Contains(err.Error(), `required client "ssh" is not available`) {
 		t.Fatalf("Connect() error = %v, want missing client error", err)
 	}
 	if runner.runCalled {

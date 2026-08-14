@@ -52,6 +52,24 @@ func TestNormalizeCandidateUsesDefaultPort(t *testing.T) {
 	}
 }
 
+func TestNormalizeCandidateClonesOptions(t *testing.T) {
+	options := Options{"ssh": {"identity_file": "~/.ssh/id_ed25519"}}
+	connection, err := NormalizeCandidate(Candidate{
+		Name:     "nas",
+		Protocol: "ssh",
+		Host:     "nas.local",
+		Options:  options,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCandidate() error = %v", err)
+	}
+
+	options["ssh"]["identity_file"] = "changed"
+	if got := connection.Options["ssh"]["identity_file"]; got != "~/.ssh/id_ed25519" {
+		t.Fatalf("connection options were not cloned: %q", got)
+	}
+}
+
 func TestNormalizeCandidateRequiresPortForUnknownProtocol(t *testing.T) {
 	_, err := NormalizeCandidate(Candidate{
 		Name:     "custom",

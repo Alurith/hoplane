@@ -14,6 +14,7 @@ import (
 var (
 	ErrUnsupportedProtocol = errors.New("unsupported protocol")
 	ErrDryRunUnsupported   = errors.New("dry-run unsupported")
+	ErrClientUnavailable   = errors.New("required client unavailable")
 )
 
 // IO contains the streams a connector may use for an interactive connection.

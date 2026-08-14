@@ -3,6 +3,8 @@ package config
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/Alurith/hoplane/internal/domain"
 )
 
 func TestLoadAndSave(t *testing.T) {
@@ -14,6 +16,12 @@ func TestLoadAndSave(t *testing.T) {
 		Protocol: "ssh",
 		Host:     "nas.local",
 		Port:     &port,
+		Options: domain.Options{
+			"ssh": {
+				"identity_file": "~/.ssh/id_ed25519",
+				"proxy_jump":    "bastion",
+			},
+		},
 	}}
 
 	if err := Save(path, file); err != nil {
@@ -25,6 +33,10 @@ func TestLoadAndSave(t *testing.T) {
 	}
 	if len(loaded.Connections) != 1 || loaded.Connections[0].Name != "nas" {
 		t.Fatalf("loaded connections = %#v", loaded.Connections)
+	}
+	options := loaded.Connections[0].Options["ssh"]
+	if options["identity_file"] != "~/.ssh/id_ed25519" || options["proxy_jump"] != "bastion" {
+		t.Fatalf("loaded options = %#v", loaded.Connections[0].Options)
 	}
 }
 
