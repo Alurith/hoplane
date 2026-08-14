@@ -3,6 +3,7 @@ package tui
 import "charm.land/bubbles/v2/key"
 
 var (
+	quitKey    = key.NewBinding(key.WithKeys("ctrl+c"))
 	connectKey = key.NewBinding(
 		key.WithKeys("c"),
 		key.WithHelp("c", "connect"),

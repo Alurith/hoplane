@@ -60,6 +60,27 @@ func TestSSHConnectorPlansInvocation(t *testing.T) {
 	}
 }
 
+func TestSSHConnectorPlansDirectIPv6WithoutBrackets(t *testing.T) {
+	connector := NewSSHConnector(&fakeRunner{})
+	connection := domain.Connection{
+		Endpoint: domain.Endpoint{
+			Protocol: domain.ProtocolSSH,
+			Host:     "2001:db8::10",
+			Port:     2222,
+			User:     "alice",
+		},
+	}
+
+	got, err := connector.Plan(connection)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := Invocation{Program: "ssh", Args: []string{"-p", "2222", "alice@2001:db8::10"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Plan() = %#v, want %#v", got, want)
+	}
+}
+
 func TestSSHConnectorPlansSSHOptions(t *testing.T) {
 	connector := NewSSHConnector(&fakeRunner{})
 	connection := domain.Connection{

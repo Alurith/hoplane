@@ -70,6 +70,35 @@ func TestNormalizeCandidateClonesOptions(t *testing.T) {
 	}
 }
 
+func TestNormalizeCandidateAcceptsBracketedIPv6(t *testing.T) {
+	connection, err := NormalizeCandidate(Candidate{
+		Name:     "router",
+		Protocol: "ssh",
+		Host:     "[2001:DB8::10]",
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCandidate() error = %v", err)
+	}
+	if connection.Endpoint.Host != "2001:db8::10" {
+		t.Fatalf("host = %q, want normalized IPv6 address", connection.Endpoint.Host)
+	}
+}
+
+func TestNormalizeCandidateRejectsInvalidBracketedOrTargetHosts(t *testing.T) {
+	for _, host := range []string{"[]", "[host.local]", "-oProxyCommand=bad", "user@host.local"} {
+		t.Run(host, func(t *testing.T) {
+			_, err := NormalizeCandidate(Candidate{
+				Name:     "invalid",
+				Protocol: "ssh",
+				Host:     host,
+			})
+			if err == nil {
+				t.Fatalf("NormalizeCandidate() error = nil for host %q", host)
+			}
+		})
+	}
+}
+
 func TestNormalizeCandidateRequiresPortForUnknownProtocol(t *testing.T) {
 	_, err := NormalizeCandidate(Candidate{
 		Name:     "custom",

@@ -70,6 +70,23 @@ func TestAddPersistsRDPOptions(t *testing.T) {
 	}
 }
 
+func TestAddRejectsEmptySSHOption(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
+
+	err := Execute(context.Background(), []string{
+		"add", "nas", "--config", path, "--ssh-config", sshPath,
+		"--protocol", "ssh", "--host", "nas.local", "--identity-file", "   ",
+	}, Dependencies{
+		Input:  bytes.NewBuffer(nil),
+		Output: &bytes.Buffer{},
+		Errors: &bytes.Buffer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), `SSH option "identity_file" cannot be empty`) {
+		t.Fatalf("add error = %v, want empty option error", err)
+	}
+}
+
 func TestAddRejectsRDPOptionsForSSH(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	sshPath := filepath.Join(t.TempDir(), "ssh", "config")

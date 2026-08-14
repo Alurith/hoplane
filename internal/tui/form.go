@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/csv"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,12 +39,11 @@ const (
 )
 
 type connectionForm struct {
-	form        *huh.Form
-	mode        formMode
-	original    domain.Connection
-	values      formValues
-	liveValues  *formValues
-	optionError error
+	form       *huh.Form
+	mode       formMode
+	original   domain.Connection
+	values     formValues
+	liveValues *formValues
 }
 
 func newAddForm() connectionForm {
@@ -58,7 +58,7 @@ func newEditForm(connection domain.Connection) connectionForm {
 		Port:        strconv.FormatUint(uint64(connection.Endpoint.Port), 10),
 		User:        connection.Endpoint.User,
 		Description: connection.Description,
-		Tags:        strings.Join(connection.Tags, ", "),
+		Tags:        formatTags(connection.Tags),
 	}
 
 	if options := connection.Options[sshoptions.Namespace]; options != nil {
@@ -71,14 +71,7 @@ func newEditForm(connection domain.Connection) connectionForm {
 		values.RDPIgnoreCertificate, _ = strconv.ParseBool(options[rdpoptions.IgnoreCertificate])
 	}
 
-	form := newConnectionForm(formEdit, connection, values)
-	switch connection.Endpoint.Protocol {
-	case domain.ProtocolSSH:
-		_, form.optionError = sshoptions.Decode(connection.Options)
-	case domain.ProtocolRDP:
-		_, form.optionError = rdpoptions.Decode(connection.Options)
-	}
-	return form
+	return newConnectionForm(formEdit, connection, values)
 }
 
 func newConnectionForm(mode formMode, original domain.Connection, values formValues) connectionForm {
@@ -136,6 +129,7 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		sshGroup,
 		rdpGroup,
 	)
+	form.CancelCmd = tea.Quit
 	return connectionForm{
 		form:       form,
 		mode:       mode,
@@ -143,6 +137,38 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		values:     values,
 		liveValues: shared,
 	}
+}
+
+func formatTags(tags []string) string {
+	formatted := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if !strings.ContainsAny(tag, ",\"\r\n") {
+			formatted = append(formatted, tag)
+			continue
+		}
+
+		var encoded strings.Builder
+		writer := csv.NewWriter(&encoded)
+		_ = writer.Write([]string{tag})
+		writer.Flush()
+		formatted = append(formatted, strings.TrimSuffix(encoded.String(), "\n"))
+	}
+	return strings.Join(formatted, ", ")
+}
+
+func parseTags(value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+
+	reader := csv.NewReader(strings.NewReader(value))
+	reader.FieldsPerRecord = -1
+	reader.TrimLeadingSpace = true
+	tags, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("parse tags: %w", err)
+	}
+	return tags, nil
 }
 
 func formTitle(mode formMode) string {
@@ -217,9 +243,11 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 }
 
 func (f connectionForm) Candidate() (domain.Candidate, error) {
-	if f.optionError != nil {
-		return domain.Candidate{}, f.optionError
+	tags, err := parseTags(f.values.Tags)
+	if err != nil {
+		return domain.Candidate{}, err
 	}
+
 	var port *uint16
 	if strings.TrimSpace(f.values.Port) != "" {
 		value, err := strconv.ParseUint(strings.TrimSpace(f.values.Port), 10, 16)
@@ -237,7 +265,7 @@ func (f connectionForm) Candidate() (domain.Candidate, error) {
 		Port:        port,
 		User:        f.values.User,
 		Description: f.values.Description,
-		Tags:        strings.Split(f.values.Tags, ","),
+		Tags:        tags,
 		Options:     f.options(),
 	}
 	if f.mode == formEdit {
@@ -262,17 +290,31 @@ func (f connectionForm) Candidate() (domain.Candidate, error) {
 }
 
 func (f connectionForm) options() domain.Options {
+	protocol := strings.ToLower(strings.TrimSpace(f.values.Protocol))
 	var options domain.Options
 	if f.mode == formEdit {
 		options = domain.CloneOptions(f.original.Options)
-		delete(options, string(f.original.Endpoint.Protocol))
+		originalProtocol := string(f.original.Endpoint.Protocol)
+		if protocol != originalProtocol {
+			delete(options, originalProtocol)
+		}
 	}
 
-	protocol := strings.ToLower(strings.TrimSpace(f.values.Protocol))
 	switch protocol {
 	case string(domain.ProtocolSSH):
 		delete(options, rdpoptions.Namespace)
-		values := make(map[string]string, 2)
+		values := make(map[string]string, 4)
+		if existing := options[sshoptions.Namespace]; existing != nil {
+			// These references are managed by discovery and are intentionally
+			// not exposed in the form. Preserve them when editing a persisted
+			// copy of an SSH alias so it keeps OpenSSH's full configuration.
+			if value := existing[sshoptions.ConfigFile]; value != "" {
+				values[sshoptions.ConfigFile] = value
+				if alias := existing[sshoptions.HostAlias]; alias != "" {
+					values[sshoptions.HostAlias] = alias
+				}
+			}
+		}
 		if strings.TrimSpace(f.values.SSHIdentityFile) != "" {
 			values[sshoptions.IdentityFile] = strings.TrimSpace(f.values.SSHIdentityFile)
 		}
@@ -284,6 +326,8 @@ func (f connectionForm) options() domain.Options {
 				options = make(domain.Options)
 			}
 			options[sshoptions.Namespace] = values
+		} else {
+			delete(options, sshoptions.Namespace)
 		}
 	case string(domain.ProtocolRDP):
 		delete(options, sshoptions.Namespace)
@@ -299,6 +343,8 @@ func (f connectionForm) options() domain.Options {
 			for namespace, values := range encoded {
 				options[namespace] = values
 			}
+		} else {
+			delete(options, rdpoptions.Namespace)
 		}
 	default:
 		delete(options, sshoptions.Namespace)
@@ -337,6 +383,7 @@ func newDuplicateForm(source domain.Connection) duplicateForm {
 			huh.NewInput().Key("name").Title("Name").Value(&name).Validate(required("name")),
 		).Title("Duplicate connection"),
 	)
+	form.CancelCmd = tea.Quit
 	return duplicateForm{form: form, source: source, name: name}
 }
 
@@ -387,6 +434,7 @@ func newDeleteConfirmation(source domain.Connection) deleteConfirmation {
 				Value(&confirmed),
 		),
 	)
+	form.CancelCmd = tea.Quit
 	return deleteConfirmation{form: form, source: source, confirmed: confirmed}
 }
 

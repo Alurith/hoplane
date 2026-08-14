@@ -74,13 +74,9 @@ func (c SSHConnector) Plan(connection domain.Connection) (Invocation, error) {
 		args = append(args, options.HostAlias)
 	} else {
 		args = append(args, "-p", strconv.FormatUint(uint64(connection.Endpoint.Port), 10))
-		host := connection.Endpoint.Host
-		if strings.Contains(host, ":") {
-			host = "[" + host + "]"
-		}
-		target := host
+		target := connection.Endpoint.Host
 		if connection.Endpoint.User != "" {
-			target = connection.Endpoint.User + "@" + host
+			target = connection.Endpoint.User + "@" + target
 		}
 		args = append(args, target)
 	}

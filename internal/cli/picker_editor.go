@@ -9,8 +9,6 @@ import (
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
-	"github.com/Alurith/hoplane/internal/rdpoptions"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 )
 
 type pickerEditor struct {
@@ -193,20 +191,5 @@ func findStaticEntry(file config.File, name string) (int, bool) {
 }
 
 func normalizePickerCandidate(candidate domain.Candidate, path string) (domain.Connection, error) {
-	candidate.Source = domain.SourceRef{Name: "static", ID: path}
-	connection, err := domain.NormalizeCandidate(candidate)
-	if err != nil {
-		return domain.Connection{}, err
-	}
-	switch connection.Endpoint.Protocol {
-	case domain.ProtocolSSH:
-		if _, err := sshoptions.Decode(connection.Options); err != nil {
-			return domain.Connection{}, err
-		}
-	case domain.ProtocolRDP:
-		if _, err := rdpoptions.Decode(connection.Options); err != nil {
-			return domain.Connection{}, err
-		}
-	}
-	return connection, nil
+	return normalizeCandidate(candidate, path)
 }

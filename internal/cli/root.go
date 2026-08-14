@@ -11,6 +11,8 @@ import (
 	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/rdpoptions"
+	"github.com/Alurith/hoplane/internal/sshoptions"
 	"github.com/Alurith/hoplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -48,6 +50,9 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 		Args:          cobra.NoArgs,
 		RunE:          state.runPick,
 	}
+	command.SetIn(dependencies.Input)
+	command.SetOut(dependencies.Output)
+	command.SetErr(dependencies.Errors)
 	command.PersistentFlags().StringVarP(&state.configPath, "config", "c", "", "path to the configuration file")
 	command.PersistentFlags().StringVar(&state.sshConfigPath, "ssh-config", "", "path to the OpenSSH configuration file")
 	command.AddCommand(
@@ -133,5 +138,30 @@ func connectionNameExists(connections []config.Entry, name string) bool {
 }
 
 func normalizeEntry(entry config.Entry, sourcePath string) (domain.Connection, error) {
-	return domain.NormalizeCandidate(entry.Candidate(domain.SourceRef{Name: "static", ID: sourcePath}))
+	return normalizeCandidate(entry.Candidate(domain.SourceRef{Name: "static", ID: sourcePath}), sourcePath)
+}
+
+func normalizeCandidate(candidate domain.Candidate, sourcePath string) (domain.Connection, error) {
+	candidate.Source = domain.SourceRef{Name: "static", ID: sourcePath}
+	connection, err := domain.NormalizeCandidate(candidate)
+	if err != nil {
+		return domain.Connection{}, err
+	}
+	if err := validateProtocolOptions(connection); err != nil {
+		return domain.Connection{}, err
+	}
+	return connection, nil
+}
+
+func validateProtocolOptions(connection domain.Connection) error {
+	switch connection.Endpoint.Protocol {
+	case domain.ProtocolSSH:
+		_, err := sshoptions.Decode(connection.Options)
+		return err
+	case domain.ProtocolRDP:
+		_, err := rdpoptions.Decode(connection.Options)
+		return err
+	default:
+		return nil
+	}
 }

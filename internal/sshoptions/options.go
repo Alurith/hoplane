@@ -4,6 +4,7 @@ package sshoptions
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -35,7 +36,13 @@ type Options struct {
 func Decode(all domain.Options) (Options, error) {
 	values := all[Namespace]
 	var options Options
-	for key, value := range values {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := values[key]
 		if err := validateValue(key, value); err != nil {
 			return Options{}, err
 		}

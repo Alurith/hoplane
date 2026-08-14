@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -37,6 +38,18 @@ func TestLoadAndSave(t *testing.T) {
 	options := loaded.Connections[0].Options["ssh"]
 	if options["identity_file"] != "~/.ssh/id_ed25519" || options["proxy_jump"] != "bastion" {
 		t.Fatalf("loaded options = %#v", loaded.Connections[0].Options)
+	}
+}
+
+func TestLoadRejectsMultipleYAMLDocuments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	contents := "version: 1\nconnections: []\n---\nversion: 1\nconnections: []\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() error = nil, want multiple-document error")
 	}
 }
 

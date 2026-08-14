@@ -56,7 +56,10 @@ type model struct {
 	action   Action
 	status   error
 	quitting bool
-	busy     bool
+
+	pendingName     string
+	pendingIndex    int
+	pendingSelected bool
 }
 
 func NewModel(ctx context.Context, connections []domain.Connection, editor ConnectionEditor) model {
@@ -104,9 +107,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirm, command = m.confirm.Update(message)
 		}
 		return m, command
+	case list.FilterMatchesMsg:
+		var command tea.Cmd
+		m.list, command = m.list.Update(message)
+		m.applyPendingSelection()
+		return m, command
 	case mutationMsg:
 		return m.updateMutation(message)
 	case tea.KeyPressMsg:
+		if key.Matches(message, quitKey) {
+			m.quitting = true
+			return m, tea.Quit
+		}
 		switch m.mode {
 		case screenConnectionForm:
 			if message.String() == "esc" {
@@ -245,7 +257,6 @@ func (m model) submitConnectionForm(command tea.Cmd) (model, tea.Cmd) {
 		return m, m.form.form.Init()
 	}
 	m.status = nil
-	m.busy = true
 	m.mode = screenSaving
 	original := domain.Connection{}
 	if m.form.mode == formEdit {
@@ -267,7 +278,6 @@ func (m model) updateDuplicateForm(message tea.Msg) (model, tea.Cmd) {
 		return m, m.duplicate.form.Init()
 	}
 	m.status = nil
-	m.busy = true
 	m.mode = screenSaving
 	return m, tea.Batch(command, m.mutationCommand(commandDuplicate, domain.Candidate{}, m.duplicate.source, name))
 }
@@ -283,7 +293,6 @@ func (m model) updateDeleteConfirmation(message tea.Msg) (model, tea.Cmd) {
 		return m, command
 	}
 	m.status = nil
-	m.busy = true
 	m.mode = screenSaving
 	return m, tea.Batch(command, m.mutationCommand(commandDeleteConfirm, domain.Candidate{}, m.confirm.source, ""))
 }
@@ -325,7 +334,7 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 		}
 		result := mutationMsg{connections: connections, err: err}
 		if command == commandDeleteConfirm {
-			result.selectIndex = m.list.GlobalIndex()
+			result.selectIndex = m.list.Index()
 		} else {
 			result.selectedName = name
 			if command == commandAdd || command == commandEdit {
@@ -337,7 +346,6 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 }
 
 func (m model) updateMutation(message mutationMsg) (tea.Model, tea.Cmd) {
-	m.busy = false
 	if message.err != nil {
 		m.mode = screenList
 		m.status = message.err
@@ -349,32 +357,64 @@ func (m model) updateMutation(message mutationMsg) (tea.Model, tea.Cmd) {
 		items = append(items, NewItem(connection))
 	}
 	command := m.list.SetItems(items)
-	if message.selectedName != "" {
-		for index, item := range items {
-			if item.(Item).Connection().Name == message.selectedName {
-				m.list.Select(index)
-				break
-			}
+	m.pendingName = ""
+	m.pendingSelected = false
+	if m.list.IsFiltered() {
+		m.pendingSelected = len(items) > 0
+		if message.selectedName != "" {
+			m.pendingName = message.selectedName
+		} else {
+			m.pendingIndex = message.selectIndex
 		}
+	} else if message.selectedName != "" {
+		selectItemByName(&m.list, items, message.selectedName)
 	} else if len(items) > 0 {
-		index := message.selectIndex
-		if index >= len(items) {
-			index = len(items) - 1
-		}
-		if index < 0 {
-			index = 0
-		}
-		m.list.Select(index)
+		selectIndex(&m.list, message.selectIndex, len(items))
 	}
 	m.mode = screenList
 	m.status = nil
 	return m, command
 }
 
+func selectItemByName(component *list.Model, items []list.Item, name string) {
+	for index, item := range items {
+		connection, ok := item.(Item)
+		if ok && connection.Connection().Name == name {
+			component.Select(index)
+			return
+		}
+	}
+}
+
+func selectIndex(component *list.Model, index, length int) {
+	if length == 0 {
+		return
+	}
+	if index >= length {
+		index = length - 1
+	}
+	if index < 0 {
+		index = 0
+	}
+	component.Select(index)
+}
+
+func (m *model) applyPendingSelection() {
+	if !m.pendingSelected {
+		return
+	}
+	visible := m.list.VisibleItems()
+	if m.pendingName != "" {
+		selectItemByName(&m.list, visible, m.pendingName)
+	} else {
+		selectIndex(&m.list, m.pendingIndex, len(visible))
+	}
+	m.pendingName = ""
+	m.pendingSelected = false
+}
+
 func reopenConnectionForm(form connectionForm) connectionForm {
-	reopened := newConnectionForm(form.mode, form.original, form.values)
-	reopened.optionError = form.optionError
-	return reopened
+	return newConnectionForm(form.mode, form.original, form.values)
 }
 
 func (m model) View() tea.View {
@@ -420,9 +460,15 @@ func Pick(
 	input io.Reader,
 	output io.Writer,
 ) (domain.Connection, Action, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	programContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	program := tea.NewProgram(
-		NewModel(ctx, connections, editor),
-		tea.WithContext(ctx),
+		NewModel(programContext, connections, editor),
+		tea.WithContext(programContext),
 		tea.WithInput(input),
 		tea.WithOutput(output),
 	)

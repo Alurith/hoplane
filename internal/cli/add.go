@@ -12,6 +12,7 @@ import (
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/output"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
+	"github.com/Alurith/hoplane/internal/sshoptions"
 )
 
 func (s *commandState) newAddCommand() *cobra.Command {
@@ -83,7 +84,7 @@ func (s *commandState) newAddCommand() *cobra.Command {
 					return fmt.Errorf("RDP options require protocol %q", domain.ProtocolRDP)
 				}
 				if sshFlagsChanged {
-					entry.Options = domain.Options{"ssh": {}}
+					entry.Options = domain.Options{sshoptions.Namespace: {}}
 					if identityFile != "" {
 						entry.Options["ssh"]["identity_file"] = identityFile
 					}
@@ -114,8 +115,8 @@ func (s *commandState) newAddCommand() *cobra.Command {
 				}
 			}
 
-			connection, err = normalizeEntry(entry, path)
-			if err != nil {
+			connection.Options = domain.CloneOptions(entry.Options)
+			if err := validateProtocolOptions(connection); err != nil {
 				return err
 			}
 			file.Connections = append(file.Connections, config.EntryFromConnection(connection))

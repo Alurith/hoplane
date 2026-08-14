@@ -24,6 +24,9 @@ func Build(ctx context.Context, sources ...discovery.Source) (Catalog, error) {
 			return Catalog{}, fmt.Errorf("discover from %s: %w", source.Name(), err)
 		}
 		for _, candidate := range candidates {
+			if err := ctx.Err(); err != nil {
+				return Catalog{}, err
+			}
 			connection, err := domain.NormalizeCandidate(candidate)
 			if err != nil {
 				return Catalog{}, fmt.Errorf("normalize %s candidate %q: %w", source.Name(), candidate.Name, err)

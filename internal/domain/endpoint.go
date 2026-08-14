@@ -139,8 +139,27 @@ func normalizeHost(value string) (string, error) {
 		}
 	}
 
-	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	bracketed := strings.HasPrefix(host, "[") || strings.HasSuffix(host, "]")
+	if bracketed {
+		if !strings.HasPrefix(host, "[") || !strings.HasSuffix(host, "]") {
+			return "", fmt.Errorf("invalid host %q", host)
+		}
+		inner := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+		if inner == "" {
+			return "", fmt.Errorf("host cannot be empty")
+		}
+		address, err := netip.ParseAddr(inner)
+		if err != nil || !address.Is6() {
+			return "", fmt.Errorf("invalid host %q", host)
+		}
+		return address.String(), nil
+	}
+
+	// Host is passed as a single argument to the process-backed connectors.
+	// Reject target syntax and option-looking values here so it cannot change
+	// the meaning of the generated client invocation.
+	if strings.HasPrefix(host, "-") || strings.ContainsAny(host, "@[]") {
+		return "", fmt.Errorf("host %q contains invalid characters", host)
 	}
 	if address, err := netip.ParseAddr(host); err == nil {
 		return address.String(), nil

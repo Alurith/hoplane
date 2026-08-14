@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -33,6 +34,15 @@ func Load(path string) (File, error) {
 	if err := decoder.Decode(&file); err != nil {
 		return File{}, fmt.Errorf("parse config %q: %w", path, err)
 	}
+
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return File{}, fmt.Errorf("config %q contains multiple YAML documents", path)
+		}
+		return File{}, fmt.Errorf("parse config %q: %w", path, err)
+	}
+
 	if file.Version != CurrentVersion {
 		return File{}, fmt.Errorf("config %q has unsupported version %d, want %d", path, file.Version, CurrentVersion)
 	}
