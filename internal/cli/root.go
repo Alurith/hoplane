@@ -11,7 +11,6 @@ import (
 	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
-	"github.com/Alurith/hoplane/internal/output"
 	"github.com/Alurith/hoplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -112,18 +111,15 @@ func (s *commandState) pick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	connection, action, err := tui.Pick(ctx, catalog.Connections, s.dependencies.Input, s.dependencies.Output)
+	editor := newPickerEditor(s)
+	connection, action, err := tui.Pick(ctx, catalog.Connections, editor, s.dependencies.Input, s.dependencies.Output)
 	if err != nil {
 		return fmt.Errorf("run picker: %w", err)
 	}
-	switch action {
-	case tui.ActionConnect:
+	if action == tui.ActionConnect {
 		return s.connectConnection(ctx, connection, connector.ConnectOptions{})
-	case tui.ActionSelect:
-		return output.WriteConnection(s.dependencies.Output, connection)
-	default:
-		return nil
 	}
+	return nil
 }
 
 func connectionNameExists(connections []config.Entry, name string) bool {

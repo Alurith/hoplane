@@ -87,8 +87,11 @@ hoplane connect nas              # start the SSH client
 hoplane connect nas --dry-run   # show the SSH command without executing it
 ```
 
-In the interactive picker, press `Enter` to output the selected connection as
-JSON, or press `c` to start its protocol connector (SSH or RDP).
+In the interactive picker, press `Enter` or `c` to connect. Press `o` to add,
+`i` to edit static connections, `y` to duplicate, and `Delete` to remove one
+after confirmation. The protocol is selected from SSH or RDP. Optional
+form sections can be skipped with `Ctrl+S`. The picker remains open after
+successful mutations.
 
 ## Development
 

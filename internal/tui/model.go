@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -12,23 +14,55 @@ import (
 	"github.com/Alurith/hoplane/internal/domain"
 )
 
-type Action int
+type screen uint8
+
+const (
+	screenList screen = iota
+	screenConnectionForm
+	screenDuplicateForm
+	screenDeleteConfirm
+	screenSaving
+)
+
+type listCommand uint8
+
+const (
+	commandNone listCommand = iota
+	commandConnect
+	commandAdd
+	commandEdit
+	commandDuplicate
+	commandDeleteConfirm
+)
+
+type Action uint8
 
 const (
 	ActionNone Action = iota
-	ActionSelect
 	ActionConnect
 )
 
 type model struct {
-	list        list.Model
-	connections []domain.Connection
-	selected    *domain.Connection
-	action      Action
-	quitting    bool
+	ctx    context.Context
+	list   list.Model
+	editor ConnectionEditor
+	mode   screen
+
+	form      connectionForm
+	duplicate duplicateForm
+	confirm   deleteConfirmation
+
+	selected *domain.Connection
+	action   Action
+	status   error
+	quitting bool
+	busy     bool
 }
 
-func NewModel(connections []domain.Connection) model {
+func NewModel(ctx context.Context, connections []domain.Connection, editor ConnectionEditor) model {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	items := make([]list.Item, 0, len(connections))
 	for _, connection := range connections {
 		items = append(items, NewItem(connection))
@@ -43,14 +77,14 @@ func NewModel(connections []domain.Connection) model {
 	component.SetStatusBarItemName("connection", "connections")
 	component.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
 	component.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{
-			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "connect")),
-		}
+		return []key.Binding{connectKey, addKey, editKey, duplicateKey, deleteKey}
 	}
 
 	return model{
-		list:        component,
-		connections: append([]domain.Connection(nil), connections...),
+		ctx:    ctx,
+		list:   component,
+		editor: editor,
+		mode:   screenList,
 	}
 }
 
@@ -60,26 +94,112 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.list.SetSize(message.Width, message.Height)
-		return m, nil
-
+		var command tea.Cmd
+		switch m.mode {
+		case screenConnectionForm:
+			m.form, command = m.form.Update(message)
+		case screenDuplicateForm:
+			m.duplicate, command = m.duplicate.Update(message)
+		case screenDeleteConfirm:
+			m.confirm, command = m.confirm.Update(message)
+		}
+		return m, command
+	case mutationMsg:
+		return m.updateMutation(message)
 	case tea.KeyPressMsg:
-		if !m.list.SettingFilter() {
-			switch message.String() {
-			case "q", "ctrl+c":
-				m.quitting = true
-				return m, tea.Quit
-			case "enter", "c":
-				item, ok := m.list.SelectedItem().(Item)
-				if ok {
-					selected := item.Connection()
-					m.selected = &selected
-					m.action = ActionSelect
-					if message.String() == "c" {
-						m.action = ActionConnect
-					}
-				}
-				return m, tea.Quit
+		switch m.mode {
+		case screenConnectionForm:
+			if message.String() == "esc" {
+				m.mode = screenList
+				m.status = nil
+				return m, nil
 			}
+			if key.Matches(message, skipKey) {
+				form, command, skipped := m.form.SkipOptional()
+				if skipped {
+					m.form = form
+					return m.submitConnectionForm(command)
+				}
+			}
+			updated, command := m.updateConnectionForm(message)
+			return updated, command
+		case screenDuplicateForm:
+			if message.String() == "esc" {
+				m.mode = screenList
+				m.status = nil
+				return m, nil
+			}
+			updated, command := m.updateDuplicateForm(message)
+			return updated, command
+		case screenDeleteConfirm:
+			if message.String() == "esc" {
+				m.mode = screenList
+				m.status = nil
+				return m, nil
+			}
+			updated, command := m.updateDeleteConfirmation(message)
+			return updated, command
+		case screenSaving:
+			return m, nil
+		case screenList:
+			if !m.list.SettingFilter() {
+				switch {
+				case key.Matches(message, enterKey), key.Matches(message, connectKey):
+					updated, command := m.beginConnection()
+					return updated, command
+				case key.Matches(message, addKey):
+					m.form = newAddForm()
+					m.status = nil
+					m.mode = screenConnectionForm
+					return m, m.form.form.Init()
+				case key.Matches(message, editKey):
+					connection, ok := m.selectedItem()
+					if !ok {
+						return m, nil
+					}
+					if m.editor == nil || !m.editor.CanModify(connection) {
+						m.status = fmt.Errorf("connection %q cannot be modified", connection.Name)
+						return m, nil
+					}
+					m.form = newEditForm(connection)
+					m.status = nil
+					m.mode = screenConnectionForm
+					return m, m.form.form.Init()
+				case key.Matches(message, duplicateKey):
+					connection, ok := m.selectedItem()
+					if !ok {
+						return m, nil
+					}
+					m.duplicate = newDuplicateForm(connection)
+					m.status = nil
+					m.mode = screenDuplicateForm
+					return m, m.duplicate.form.Init()
+				case key.Matches(message, deleteKey):
+					connection, ok := m.selectedItem()
+					if !ok {
+						return m, nil
+					}
+					if m.editor == nil || !m.editor.CanModify(connection) {
+						m.status = fmt.Errorf("connection %q cannot be deleted", connection.Name)
+						return m, nil
+					}
+					m.confirm = newDeleteConfirmation(connection)
+					m.status = nil
+					m.mode = screenDeleteConfirm
+					return m, m.confirm.form.Init()
+				}
+			}
+		}
+	default:
+		switch m.mode {
+		case screenConnectionForm:
+			return m.updateConnectionForm(msg)
+		case screenDuplicateForm:
+			return m.updateDuplicateForm(msg)
+		case screenDeleteConfirm:
+			return m.updateDeleteConfirmation(msg)
+		case screenSaving:
+			return m, nil
 		}
 	}
 
@@ -88,13 +208,196 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m model) View() tea.View {
-	if m.quitting || m.selected != nil {
-		view := tea.NewView("")
-		view.AltScreen = true
-		return view
+func (m model) beginConnection() (model, tea.Cmd) {
+	connection, ok := m.selectedItem()
+	if !ok {
+		return m, nil
 	}
-	view := tea.NewView(m.list.View())
+	m.selected = &connection
+	m.action = ActionConnect
+	m.quitting = true
+	return m, tea.Quit
+}
+
+func (m model) selectedItem() (domain.Connection, bool) {
+	item, ok := m.list.SelectedItem().(Item)
+	if !ok {
+		return domain.Connection{}, false
+	}
+	return item.Connection(), true
+}
+
+func (m model) updateConnectionForm(message tea.Msg) (model, tea.Cmd) {
+	var command tea.Cmd
+	m.form, command = m.form.Update(message)
+	return m.submitConnectionForm(command)
+}
+
+func (m model) submitConnectionForm(command tea.Cmd) (model, tea.Cmd) {
+	if !m.form.Completed() {
+		return m, command
+	}
+
+	candidate, err := m.form.Candidate()
+	if err != nil {
+		m.status = err
+		m.form = reopenConnectionForm(m.form)
+		return m, m.form.form.Init()
+	}
+	m.status = nil
+	m.busy = true
+	m.mode = screenSaving
+	original := domain.Connection{}
+	if m.form.mode == formEdit {
+		original = m.form.original
+	}
+	return m, tea.Batch(command, m.mutationCommand(commandForForm(m.form), candidate, original, ""))
+}
+
+func (m model) updateDuplicateForm(message tea.Msg) (model, tea.Cmd) {
+	var command tea.Cmd
+	m.duplicate, command = m.duplicate.Update(message)
+	if !m.duplicate.Completed() {
+		return m, command
+	}
+	name := m.duplicate.Name()
+	if name == "" {
+		m.status = fmt.Errorf("name cannot be empty")
+		m.duplicate = newDuplicateForm(m.duplicate.source)
+		return m, m.duplicate.form.Init()
+	}
+	m.status = nil
+	m.busy = true
+	m.mode = screenSaving
+	return m, tea.Batch(command, m.mutationCommand(commandDuplicate, domain.Candidate{}, m.duplicate.source, name))
+}
+
+func (m model) updateDeleteConfirmation(message tea.Msg) (model, tea.Cmd) {
+	var command tea.Cmd
+	m.confirm, command = m.confirm.Update(message)
+	if !m.confirm.Completed() {
+		return m, command
+	}
+	if !m.confirm.confirmed {
+		m.mode = screenList
+		return m, command
+	}
+	m.status = nil
+	m.busy = true
+	m.mode = screenSaving
+	return m, tea.Batch(command, m.mutationCommand(commandDeleteConfirm, domain.Candidate{}, m.confirm.source, ""))
+}
+
+type mutationMsg struct {
+	connections  []domain.Connection
+	selectedName string
+	selectIndex  int
+	err          error
+}
+
+func commandForForm(form connectionForm) listCommand {
+	if form.mode == formEdit {
+		return commandEdit
+	}
+	return commandAdd
+}
+
+func (m model) mutationCommand(command listCommand, candidate domain.Candidate, original domain.Connection, name string) tea.Cmd {
+	return func() tea.Msg {
+		if m.editor == nil {
+			return mutationMsg{err: fmt.Errorf("connection editor is not configured")}
+		}
+		var (
+			connections []domain.Connection
+			err         error
+		)
+		switch command {
+		case commandAdd:
+			connections, err = m.editor.Create(m.ctx, candidate)
+		case commandEdit:
+			connections, err = m.editor.Update(m.ctx, original, candidate)
+		case commandDuplicate:
+			connections, err = m.editor.Duplicate(m.ctx, original, name)
+		case commandDeleteConfirm:
+			connections, err = m.editor.Delete(m.ctx, original)
+		default:
+			return mutationMsg{err: fmt.Errorf("unknown picker command")}
+		}
+		result := mutationMsg{connections: connections, err: err}
+		if command == commandDeleteConfirm {
+			result.selectIndex = m.list.GlobalIndex()
+		} else {
+			result.selectedName = name
+			if command == commandAdd || command == commandEdit {
+				result.selectedName = strings.TrimSpace(candidate.Name)
+			}
+		}
+		return result
+	}
+}
+
+func (m model) updateMutation(message mutationMsg) (tea.Model, tea.Cmd) {
+	m.busy = false
+	if message.err != nil {
+		m.mode = screenList
+		m.status = message.err
+		return m, nil
+	}
+
+	items := make([]list.Item, 0, len(message.connections))
+	for _, connection := range message.connections {
+		items = append(items, NewItem(connection))
+	}
+	command := m.list.SetItems(items)
+	if message.selectedName != "" {
+		for index, item := range items {
+			if item.(Item).Connection().Name == message.selectedName {
+				m.list.Select(index)
+				break
+			}
+		}
+	} else if len(items) > 0 {
+		index := message.selectIndex
+		if index >= len(items) {
+			index = len(items) - 1
+		}
+		if index < 0 {
+			index = 0
+		}
+		m.list.Select(index)
+	}
+	m.mode = screenList
+	m.status = nil
+	return m, command
+}
+
+func reopenConnectionForm(form connectionForm) connectionForm {
+	reopened := newConnectionForm(form.mode, form.original, form.values)
+	reopened.optionError = form.optionError
+	return reopened
+}
+
+func (m model) View() tea.View {
+	var content string
+	switch m.mode {
+	case screenConnectionForm:
+		content = m.form.View()
+	case screenDuplicateForm:
+		content = m.duplicate.View()
+	case screenDeleteConfirm:
+		content = m.confirm.View()
+	case screenSaving:
+		content = "Saving…"
+	default:
+		content = m.list.View()
+	}
+	if m.status != nil {
+		content += "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.status.Error())
+	}
+	if m.quitting {
+		content = ""
+	}
+	view := tea.NewView(content)
 	view.AltScreen = true
 	return view
 }
@@ -110,9 +413,15 @@ func (m model) Action() Action {
 	return m.action
 }
 
-func Pick(ctx context.Context, connections []domain.Connection, input io.Reader, output io.Writer) (domain.Connection, Action, error) {
+func Pick(
+	ctx context.Context,
+	connections []domain.Connection,
+	editor ConnectionEditor,
+	input io.Reader,
+	output io.Writer,
+) (domain.Connection, Action, error) {
 	program := tea.NewProgram(
-		NewModel(connections),
+		NewModel(ctx, connections, editor),
 		tea.WithContext(ctx),
 		tea.WithInput(input),
 		tea.WithOutput(output),

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,14 +10,14 @@ import (
 )
 
 func TestModelSelectsConnection(t *testing.T) {
-	initial := NewModel([]domain.Connection{{
+	initial := NewModel(context.Background(), []domain.Connection{{
 		Name: "nas",
 		Endpoint: domain.Endpoint{
 			Protocol: domain.ProtocolSSH,
 			Host:     "nas.local",
 			Port:     22,
 		},
-	}})
+	}}, nil)
 
 	updated, command := initial.Update(tea.KeyPressMsg(tea.Key{Text: "enter"}))
 	if command == nil {
@@ -27,20 +28,20 @@ func TestModelSelectsConnection(t *testing.T) {
 	if !ok || selected.Name != "nas" {
 		t.Fatalf("selected = %#v, ok = %v", selected, ok)
 	}
-	if result.Action() != ActionSelect {
-		t.Fatalf("action = %v, want %v", result.Action(), ActionSelect)
+	if result.Action() != ActionConnect {
+		t.Fatalf("action = %v, want %v", result.Action(), ActionConnect)
 	}
 }
 
 func TestModelConnectsConnection(t *testing.T) {
-	initial := NewModel([]domain.Connection{{
+	initial := NewModel(context.Background(), []domain.Connection{{
 		Name: "nas",
 		Endpoint: domain.Endpoint{
 			Protocol: domain.ProtocolSSH,
 			Host:     "nas.local",
 			Port:     22,
 		},
-	}})
+	}}, nil)
 
 	updated, command := initial.Update(tea.KeyPressMsg(tea.Key{Text: "c"}))
 	if command == nil {
