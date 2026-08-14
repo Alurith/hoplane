@@ -1,0 +1,14 @@
+{
+  "references": {
+    "bubbletea": {
+      "repository": "charmbracelet/bubbletea",
+      "branch": "main",
+      "description": "Use for Bubble Tea Go TUI architecture: Model/Init/Update/View, messages, commands, program lifecycle, terminal I/O, rendering, examples, and tests. Prefer current APIs."
+    },
+    "wishlist": {
+      "repository": "charmbracelet/wishlist",
+      "branch": "main",
+      "description": "Use as a concrete Charm-style CLI/TUI reference for list navigation, keyboard interaction, Bubbles/Lip Gloss integration, configuration, CLI structure, and tests. Do not copy SSH-specific features unless requested."
+    }
+  }
+}
