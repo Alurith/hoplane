@@ -18,7 +18,7 @@ The first vertical slice provides a local declarative catalog with:
 - a Bubble Tea picker
 - protocol-neutral entries with SSH, RDP, VNC, and custom protocol names
 
-Connection execution and network discovery will be added in later slices.
+Connection execution is available through the SSH connector; network discovery will be added in later slices.
 
 ## Configuration
 
@@ -60,6 +60,8 @@ hoplane pick                    # open the picker
 hoplane add office --protocol rdp --host desktop.example.com --user alice
 hoplane list                    # JSON output
 hoplane show office             # JSON output
+hoplane connect nas              # start the SSH client
+hoplane connect nas --dry-run   # show the SSH command without executing it
 ```
 
 ## Development

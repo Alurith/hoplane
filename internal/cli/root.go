@@ -8,6 +8,7 @@ import (
 
 	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
+	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/output"
@@ -24,6 +25,7 @@ type Dependencies struct {
 type commandState struct {
 	dependencies Dependencies
 	configPath   string
+	registry     connector.Registry
 }
 
 func Execute(ctx context.Context, args []string, dependencies Dependencies) error {
@@ -34,7 +36,10 @@ func Execute(ctx context.Context, args []string, dependencies Dependencies) erro
 }
 
 func NewRootCommand(dependencies Dependencies) *cobra.Command {
-	state := &commandState{dependencies: dependencies}
+	state := &commandState{
+		dependencies: dependencies,
+		registry:     connector.DefaultRegistry(),
+	}
 	command := &cobra.Command{
 		Use:           "hoplane",
 		Short:         "A protocol-neutral connection directory",
@@ -49,6 +54,7 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 		state.newListCommand(),
 		state.newShowCommand(),
 		state.newPickCommand(),
+		state.newConnectCommand(),
 	)
 	return command
 }
