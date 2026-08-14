@@ -11,6 +11,7 @@ import (
 	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/output"
+	"github.com/Alurith/hoplane/internal/rdpoptions"
 )
 
 func (s *commandState) newAddCommand() *cobra.Command {
@@ -22,6 +23,9 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	var tags []string
 	var identityFile string
 	var proxyJump string
+	var rdpClient string
+	var rdpFullscreen bool
+	var rdpIgnoreCertificate bool
 
 	command := &cobra.Command{
 		Use:   "add <name>",
@@ -60,15 +64,6 @@ func (s *commandState) newAddCommand() *cobra.Command {
 				Description: description,
 				Tags:        tags,
 			}
-			if identityFile != "" || proxyJump != "" {
-				entry.Options = domain.Options{"ssh": {}}
-				if identityFile != "" {
-					entry.Options["ssh"]["identity_file"] = identityFile
-				}
-				if proxyJump != "" {
-					entry.Options["ssh"]["proxy_jump"] = proxyJump
-				}
-			}
 			if port != 0 {
 				entry.Port = &port
 			}
@@ -77,8 +72,51 @@ func (s *commandState) newAddCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(entry.Options) > 0 && connection.Endpoint.Protocol != domain.ProtocolSSH {
-				return fmt.Errorf("SSH options require protocol %q", domain.ProtocolSSH)
+			sshFlagsChanged := cmd.Flags().Changed("identity-file") || cmd.Flags().Changed("proxy-jump")
+			rdpFlagsChanged := cmd.Flags().Changed("rdp-client") ||
+				cmd.Flags().Changed("rdp-fullscreen") ||
+				cmd.Flags().Changed("rdp-ignore-certificate")
+
+			switch connection.Endpoint.Protocol {
+			case domain.ProtocolSSH:
+				if rdpFlagsChanged {
+					return fmt.Errorf("RDP options require protocol %q", domain.ProtocolRDP)
+				}
+				if sshFlagsChanged {
+					entry.Options = domain.Options{"ssh": {}}
+					if identityFile != "" {
+						entry.Options["ssh"]["identity_file"] = identityFile
+					}
+					if proxyJump != "" {
+						entry.Options["ssh"]["proxy_jump"] = proxyJump
+					}
+				}
+			case domain.ProtocolRDP:
+				if sshFlagsChanged {
+					return fmt.Errorf("SSH options require protocol %q", domain.ProtocolSSH)
+				}
+				if rdpFlagsChanged {
+					if cmd.Flags().Changed("rdp-client") && strings.TrimSpace(rdpClient) == "" {
+						return fmt.Errorf("RDP option %q cannot be empty", rdpoptions.Client)
+					}
+					entry.Options = rdpoptions.Encode(rdpoptions.Options{
+						Client:            rdpClient,
+						Fullscreen:        rdpFullscreen,
+						IgnoreCertificate: rdpIgnoreCertificate,
+					})
+				}
+			default:
+				if sshFlagsChanged {
+					return fmt.Errorf("SSH options require protocol %q", domain.ProtocolSSH)
+				}
+				if rdpFlagsChanged {
+					return fmt.Errorf("RDP options require protocol %q", domain.ProtocolRDP)
+				}
+			}
+
+			connection, err = normalizeEntry(entry, path)
+			if err != nil {
+				return err
 			}
 			file.Connections = append(file.Connections, config.EntryFromConnection(connection))
 			if err := config.Save(path, file); err != nil {
@@ -96,5 +134,8 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	flags.StringSliceVar(&tags, "tag", nil, "connection tag; may be repeated")
 	flags.StringVar(&identityFile, "identity-file", "", "SSH identity file")
 	flags.StringVar(&proxyJump, "proxy-jump", "", "SSH proxy jump target")
+	flags.StringVar(&rdpClient, "rdp-client", "", "RDP client (currently xfreerdp)")
+	flags.BoolVar(&rdpFullscreen, "rdp-fullscreen", false, "start RDP in fullscreen")
+	flags.BoolVar(&rdpIgnoreCertificate, "rdp-ignore-certificate", false, "ignore the RDP server certificate")
 	return command
 }

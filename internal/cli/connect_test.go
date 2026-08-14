@@ -45,6 +45,37 @@ func TestConnectDryRun(t *testing.T) {
 	}
 }
 
+func TestConnectRDPDryRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
+	file := config.NewFile()
+	file.Connections = []config.Entry{{
+		Name:     "office",
+		Protocol: "rdp",
+		Host:     "desktop.example.com",
+		User:     "alice",
+	}}
+	if err := config.Save(path, file); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"connect", "office", "--config", path, "--ssh-config", sshPath, "--dry-run",
+	}, Dependencies{
+		Input:  strings.NewReader(""),
+		Output: &output,
+		Errors: &bytes.Buffer{},
+	}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	const want = "dry-run: connection \"office\" would execute xfreerdp /v:desktop.example.com:3389 /u:alice\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
 func TestConnectSSHConfigAliasDryRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
@@ -81,7 +112,7 @@ func TestConnectRejectsUnsupportedProtocol(t *testing.T) {
 	port := uint16(3389)
 	file.Connections = []config.Entry{{
 		Name:     "office",
-		Protocol: "rdp",
+		Protocol: "custom",
 		Host:     "desktop.local",
 		Port:     &port,
 	}}

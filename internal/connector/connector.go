@@ -98,6 +98,7 @@ func NewRegistry(connectors ...Connector) (Registry, error) {
 func DefaultRegistry() Registry {
 	return Registry{connectors: map[domain.Protocol]Connector{
 		domain.ProtocolSSH: NewSSHConnector(ExecRunner{}),
+		domain.ProtocolRDP: NewRDPConnector(ExecRunner{}),
 	}}
 }
 

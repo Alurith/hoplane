@@ -39,13 +39,25 @@ func TestRegistryLooksUpConnectorByProtocol(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryIncludesRDP(t *testing.T) {
+	registry := DefaultRegistry()
+
+	got, err := registry.Lookup(domain.ProtocolRDP)
+	if err != nil {
+		t.Fatalf("Lookup() error = %v", err)
+	}
+	if got.Protocol() != domain.ProtocolRDP {
+		t.Fatalf("connector protocol = %q, want %q", got.Protocol(), domain.ProtocolRDP)
+	}
+}
+
 func TestRegistryRejectsUnsupportedProtocol(t *testing.T) {
 	registry, err := NewRegistry()
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 
-	_, err = registry.Lookup(domain.ProtocolRDP)
+	_, err = registry.Lookup(domain.Protocol("custom"))
 	if !errors.Is(err, ErrUnsupportedProtocol) {
 		t.Fatalf("Lookup() error = %v, want ErrUnsupportedProtocol", err)
 	}
@@ -86,6 +98,37 @@ func TestRegistryDryRunUsesPlannerWithoutExecutingConnector(t *testing.T) {
 	}
 
 	const want = "dry-run: connection \"nas\" would execute ssh -p 22 nas.local\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
+func TestRegistryDryRunRDPUsesXFREERDP(t *testing.T) {
+	registry, err := NewRegistry(NewRDPConnector(&fakeRunner{path: "/usr/bin/xfreerdp"}))
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	connection := domain.Connection{
+		Name: "office",
+		Endpoint: domain.Endpoint{
+			Protocol: domain.ProtocolRDP,
+			Host:     "desktop.example.com",
+			Port:     3389,
+			User:     "alice",
+		},
+	}
+	if err := registry.Connect(
+		context.Background(),
+		connection,
+		IO{Output: &output},
+		ConnectOptions{DryRun: true},
+	); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	const want = "dry-run: connection \"office\" would execute xfreerdp /v:desktop.example.com:3389 /u:alice\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
