@@ -65,7 +65,7 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 	return command
 }
 
-func (s *commandState) loadCatalog(ctx context.Context) (catalog.Catalog, error) {
+func (s *commandState) loadStaticCatalog(ctx context.Context) (catalog.Catalog, error) {
 	path, err := s.path()
 	if err != nil {
 		return catalog.Catalog{}, err
@@ -74,15 +74,53 @@ func (s *commandState) loadCatalog(ctx context.Context) (catalog.Catalog, error)
 	if err != nil {
 		return catalog.Catalog{}, err
 	}
+	return catalog.Build(ctx, discovery.NewStaticSource(file, path))
+}
+
+func (s *commandState) loadSSHCatalog(ctx context.Context) (catalog.Catalog, error) {
 	sshPath, err := s.sshPath()
 	if err != nil {
 		return catalog.Catalog{}, err
 	}
-	return catalog.Build(
-		ctx,
-		discovery.NewStaticSource(file, path),
-		discovery.NewSSHConfigSource(sshPath),
-	)
+	return catalog.Build(ctx, discovery.NewSSHConfigSource(sshPath))
+}
+
+func (s *commandState) loadCatalog(ctx context.Context) (catalog.Catalog, error) {
+	staticCatalog, err := s.loadStaticCatalog(ctx)
+	if err != nil {
+		return catalog.Catalog{}, err
+	}
+	sshCatalog, err := s.loadSSHCatalog(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return catalog.Catalog{}, err
+		}
+		staticCatalog.Warnings = append(staticCatalog.Warnings, catalog.Warning{
+			Source:  "ssh-config",
+			Message: err.Error(),
+		})
+		return staticCatalog, nil
+	}
+	return catalog.Merge(staticCatalog, sshCatalog)
+}
+
+func (s *commandState) findConnection(ctx context.Context, name string) (domain.Connection, error) {
+	staticCatalog, err := s.loadStaticCatalog(ctx)
+	if err != nil {
+		return domain.Connection{}, err
+	}
+	if connection, ok := staticCatalog.Find(name); ok {
+		return connection, nil
+	}
+
+	sshCatalog, err := s.loadSSHCatalog(ctx)
+	if err != nil {
+		return domain.Connection{}, fmt.Errorf("SSH discovery unavailable: %w", err)
+	}
+	if connection, ok := sshCatalog.Find(name); ok {
+		return connection, nil
+	}
+	return domain.Connection{}, fmt.Errorf("connection %q not found", name)
 }
 
 func (s *commandState) path() (string, error) {
@@ -117,7 +155,7 @@ func (s *commandState) pick(ctx context.Context) error {
 		return err
 	}
 	editor := newPickerEditor(s)
-	connection, action, err := tui.Pick(ctx, catalog.Connections, editor, s.dependencies.Input, s.dependencies.Output)
+	connection, action, err := tui.Pick(ctx, catalog.Connections, editor, s.dependencies.Input, s.dependencies.Output, warningMessages(catalog.Warnings)...)
 	if err != nil {
 		return fmt.Errorf("run picker: %w", err)
 	}
@@ -125,6 +163,14 @@ func (s *commandState) pick(ctx context.Context) error {
 		return s.connectConnection(ctx, connection, connector.ConnectOptions{})
 	}
 	return nil
+}
+
+func warningMessages(warnings []catalog.Warning) []string {
+	messages := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		messages = append(messages, fmt.Sprintf("%s: %s", warning.Source, warning.Message))
+	}
+	return messages
 }
 
 func connectionNameExists(connections []config.Entry, name string) bool {

@@ -16,7 +16,12 @@ type SourceRef struct {
 
 // Options is a protocol-neutral, namespaced option set. The domain preserves
 // it without interpreting the values; protocol adapters own their semantics.
+// Options are persisted in the static configuration.
 type Options map[string]map[string]string
+
+// Metadata contains source-owned runtime references. Unlike Options,
+// metadata is never persisted in the static configuration.
+type Metadata map[string]map[string]string
 
 // CloneOptions returns an independent copy of an option set.
 func CloneOptions(options Options) Options {
@@ -26,6 +31,26 @@ func CloneOptions(options Options) Options {
 
 	clone := make(Options, len(options))
 	for namespace, values := range options {
+		if values == nil {
+			clone[namespace] = nil
+			continue
+		}
+		clone[namespace] = make(map[string]string, len(values))
+		for key, value := range values {
+			clone[namespace][key] = value
+		}
+	}
+	return clone
+}
+
+// CloneMetadata returns an independent copy of source metadata.
+func CloneMetadata(metadata Metadata) Metadata {
+	if metadata == nil {
+		return nil
+	}
+
+	clone := make(Metadata, len(metadata))
+	for namespace, values := range metadata {
 		if values == nil {
 			clone[namespace] = nil
 			continue
@@ -49,6 +74,7 @@ type Candidate struct {
 	Tags        []string
 	Source      SourceRef
 	Options     Options
+	Metadata    Metadata
 }
 
 // Endpoint is the normalized, protocol-neutral target used by the catalog and
@@ -70,6 +96,7 @@ type Connection struct {
 	Tags        []string
 	Sources     []SourceRef
 	Options     Options
+	Metadata    Metadata
 }
 
 // NormalizeCandidate validates and normalizes a source candidate.
@@ -79,8 +106,8 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 		return Connection{}, fmt.Errorf("name cannot be empty")
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) {
-			return Connection{}, fmt.Errorf("name %q contains a control character", name)
+		if isUnsafeTextRune(r) {
+			return Connection{}, fmt.Errorf("name %q contains unsafe terminal characters", name)
 		}
 	}
 
@@ -100,11 +127,25 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 	}
 
 	user := strings.TrimSpace(candidate.User)
-	if strings.ContainsAny(user, "\r\n") {
-		return Connection{}, fmt.Errorf("connection %q: user cannot contain a newline", name)
+	if containsUnsafeText(user) {
+		return Connection{}, fmt.Errorf("connection %q: user contains unsafe terminal characters", name)
+	}
+	if containsUnsafeText(candidate.Description) {
+		return Connection{}, fmt.Errorf("connection %q: description contains unsafe terminal characters", name)
+	}
+	for _, tag := range candidate.Tags {
+		if containsUnsafeText(tag) {
+			return Connection{}, fmt.Errorf("connection %q: tag contains unsafe terminal characters", name)
+		}
 	}
 
 	source := candidate.Source
+	if containsUnsafeText(source.Name) || containsUnsafeText(source.ID) {
+		return Connection{}, fmt.Errorf("connection %q: source contains unsafe terminal characters", name)
+	}
+	if err := validateMetadata(candidate.Metadata); err != nil {
+		return Connection{}, fmt.Errorf("connection %q: %w", name, err)
+	}
 	if source.Name == "" {
 		source = SourceRef{Name: "unknown"}
 	}
@@ -122,6 +163,7 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 		Tags:        normalizeTags(candidate.Tags),
 		Sources:     []SourceRef{source},
 		Options:     CloneOptions(candidate.Options),
+		Metadata:    CloneMetadata(candidate.Metadata),
 	}, nil
 }
 
@@ -134,7 +176,7 @@ func normalizeHost(value string) (string, error) {
 		return "", fmt.Errorf("host %q contains invalid characters", host)
 	}
 	for _, r := range host {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
+		if unicode.IsSpace(r) || isUnsafeTextRune(r) {
 			return "", fmt.Errorf("host %q contains invalid characters", host)
 		}
 	}
@@ -182,6 +224,33 @@ func normalizePort(protocol Protocol, port *uint16) (uint16, error) {
 		return defaultPort, nil
 	}
 	return 0, fmt.Errorf("port is required for protocol %q", protocol)
+}
+
+func isUnsafeTextRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+}
+
+func containsUnsafeText(value string) bool {
+	for _, r := range value {
+		if isUnsafeTextRune(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateMetadata(metadata Metadata) error {
+	for namespace, values := range metadata {
+		if containsUnsafeText(namespace) {
+			return fmt.Errorf("metadata namespace contains unsafe terminal characters")
+		}
+		for key, value := range values {
+			if containsUnsafeText(key) || containsUnsafeText(value) {
+				return fmt.Errorf("metadata contains unsafe terminal characters")
+			}
+		}
+	}
+	return nil
 }
 
 func normalizeTags(tags []string) []string {

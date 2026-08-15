@@ -69,21 +69,28 @@ func TestEditFormPreservesSSHConfigReference(t *testing.T) {
 		},
 		Options: domain.Options{
 			sshoptions.Namespace: {
-				sshoptions.ConfigFile:   "/home/alice/.ssh/config",
-				sshoptions.HostAlias:    "nas",
 				sshoptions.IdentityFile: "~/.ssh/id_ed25519",
+			},
+		},
+		Metadata: domain.Metadata{
+			sshoptions.Namespace: {
+				sshoptions.ConfigFile: "/home/alice/.ssh/config",
+				sshoptions.HostAlias:  "nas",
 			},
 		},
 	}
 
 	form := newEditForm(connection)
-	options := form.options()
-	ssh := options[sshoptions.Namespace]
-	if ssh[sshoptions.ConfigFile] != "/home/alice/.ssh/config" || ssh[sshoptions.HostAlias] != "nas" {
-		t.Fatalf("SSH config reference = %#v, want preserved reference", ssh)
+	candidate, err := form.Candidate()
+	if err != nil {
+		t.Fatalf("Candidate() error = %v", err)
 	}
+	if !reflect.DeepEqual(candidate.Metadata, connection.Metadata) {
+		t.Fatalf("SSH config metadata = %#v, want %#v", candidate.Metadata, connection.Metadata)
+	}
+	ssh := candidate.Options[sshoptions.Namespace]
 	if ssh[sshoptions.IdentityFile] != "~/.ssh/id_ed25519" {
-		t.Fatalf("SSH identity file = %#v, want preserved form value", ssh)
+		t.Fatalf("SSH identity file = %#v, want form value", ssh[sshoptions.IdentityFile])
 	}
 }
 

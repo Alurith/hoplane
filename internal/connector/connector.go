@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/terminal"
 )
 
 var (
@@ -56,6 +57,7 @@ func (i Invocation) String() string {
 }
 
 func shellQuote(value string) string {
+	value = terminal.EscapeControls(value)
 	if value != "" {
 		needsQuote := false
 		for _, r := range value {

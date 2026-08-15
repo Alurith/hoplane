@@ -23,6 +23,11 @@ test:
 vet:
     go vet ./...
 
+# Scan dependencies and reachable code for known vulnerabilities.
+[group('Quality')]
+vulncheck:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
 # Run formatting checks, tests, and static analysis.
 [group('Quality')]
 check: fmt-check test vet

@@ -28,20 +28,21 @@ func (e *pickerEditor) Create(ctx context.Context, candidate domain.Candidate) (
 	if err != nil {
 		return nil, err
 	}
-	file, err := config.Load(path)
-	if err != nil {
-		return nil, err
-	}
 	connection, err := normalizePickerCandidate(candidate, path)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.checkNameAvailable(ctx, file, connection.Name, -1); err != nil {
+	if err := e.checkSSHNameAvailable(ctx, connection.Name); err != nil {
 		return nil, err
 	}
 
-	file.Connections = append(file.Connections, config.EntryFromConnection(connection))
-	if err := config.Save(path, file); err != nil {
+	if err := config.Update(ctx, path, func(file *config.File) error {
+		if err := checkStaticNameAvailable(*file, connection.Name, -1); err != nil {
+			return err
+		}
+		file.Connections = append(file.Connections, config.EntryFromConnection(connection))
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return e.reload(ctx)
@@ -59,24 +60,27 @@ func (e *pickerEditor) Update(
 	if err != nil {
 		return nil, err
 	}
-	file, err := config.Load(path)
-	if err != nil {
-		return nil, err
-	}
-	index, ok := findStaticEntry(file, original.Name)
-	if !ok {
-		return nil, fmt.Errorf("static connection %q not found", original.Name)
-	}
 	connection, err := normalizePickerCandidate(candidate, path)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.checkNameAvailable(ctx, file, connection.Name, index); err != nil {
-		return nil, err
+	if strings.TrimSpace(connection.Name) != strings.TrimSpace(original.Name) {
+		if err := e.checkSSHNameAvailable(ctx, connection.Name); err != nil {
+			return nil, err
+		}
 	}
 
-	file.Connections[index] = config.EntryFromConnection(connection)
-	if err := config.Save(path, file); err != nil {
+	if err := config.Update(ctx, path, func(file *config.File) error {
+		index, ok := findStaticEntry(*file, original.Name)
+		if !ok {
+			return fmt.Errorf("static connection %q not found", original.Name)
+		}
+		if err := checkStaticNameAvailable(*file, connection.Name, index); err != nil {
+			return err
+		}
+		file.Connections[index] = config.EntryFromConnection(connection)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return e.reload(ctx)
@@ -87,11 +91,10 @@ func (e *pickerEditor) Duplicate(
 	original domain.Connection,
 	name string,
 ) ([]domain.Connection, error) {
-	path, err := e.state.path()
-	if err != nil {
-		return nil, err
+	if original.Endpoint.Source.Name == "ssh-config" {
+		return nil, fmt.Errorf("SSH config aliases cannot be duplicated")
 	}
-	file, err := config.Load(path)
+	path, err := e.state.path()
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +102,7 @@ func (e *pickerEditor) Duplicate(
 	if name == "" {
 		return nil, fmt.Errorf("name cannot be empty")
 	}
-	if err := e.checkNameAvailable(ctx, file, name, -1); err != nil {
+	if err := e.checkSSHNameAvailable(ctx, name); err != nil {
 		return nil, err
 	}
 
@@ -112,8 +115,14 @@ func (e *pickerEditor) Duplicate(
 	if err != nil {
 		return nil, err
 	}
-	file.Connections = append(file.Connections, config.EntryFromConnection(connection))
-	if err := config.Save(path, file); err != nil {
+
+	if err := config.Update(ctx, path, func(file *config.File) error {
+		if err := checkStaticNameAvailable(*file, name, -1); err != nil {
+			return err
+		}
+		file.Connections = append(file.Connections, config.EntryFromConnection(connection))
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return e.reload(ctx)
@@ -127,16 +136,14 @@ func (e *pickerEditor) Delete(ctx context.Context, connection domain.Connection)
 	if err != nil {
 		return nil, err
 	}
-	file, err := config.Load(path)
-	if err != nil {
-		return nil, err
-	}
-	index, ok := findStaticEntry(file, connection.Name)
-	if !ok {
-		return nil, fmt.Errorf("static connection %q not found", connection.Name)
-	}
-	file.Connections = append(file.Connections[:index], file.Connections[index+1:]...)
-	if err := config.Save(path, file); err != nil {
+	if err := config.Update(ctx, path, func(file *config.File) error {
+		index, ok := findStaticEntry(*file, connection.Name)
+		if !ok {
+			return fmt.Errorf("static connection %q not found", connection.Name)
+		}
+		file.Connections = append(file.Connections[:index], file.Connections[index+1:]...)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return e.reload(ctx)
@@ -150,22 +157,7 @@ func (e *pickerEditor) reload(ctx context.Context) ([]domain.Connection, error) 
 	return catalog.Connections, nil
 }
 
-func (e *pickerEditor) checkNameAvailable(
-	ctx context.Context,
-	file config.File,
-	name string,
-	ignoredStaticIndex int,
-) error {
-	name = strings.TrimSpace(name)
-	for index, entry := range file.Connections {
-		if index == ignoredStaticIndex {
-			continue
-		}
-		if strings.TrimSpace(entry.Name) == name {
-			return fmt.Errorf("connection %q already exists", name)
-		}
-	}
-
+func (e *pickerEditor) checkSSHNameAvailable(ctx context.Context, name string) error {
 	sshPath, err := e.state.sshPath()
 	if err != nil {
 		return err
@@ -174,8 +166,21 @@ func (e *pickerEditor) checkNameAvailable(
 	if err != nil {
 		return err
 	}
-	if _, exists := sshCatalog.Find(name); exists {
+	if _, exists := sshCatalog.Find(strings.TrimSpace(name)); exists {
 		return fmt.Errorf("connection %q already exists", name)
+	}
+	return nil
+}
+
+func checkStaticNameAvailable(file config.File, name string, ignoredStaticIndex int) error {
+	name = strings.TrimSpace(name)
+	for index, entry := range file.Connections {
+		if index == ignoredStaticIndex {
+			continue
+		}
+		if strings.TrimSpace(entry.Name) == name {
+			return fmt.Errorf("connection %q already exists", name)
+		}
 	}
 	return nil
 }

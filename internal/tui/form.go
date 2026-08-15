@@ -12,6 +12,7 @@ import (
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
 	"github.com/Alurith/hoplane/internal/sshoptions"
+	"github.com/Alurith/hoplane/internal/terminal"
 )
 
 type formValues struct {
@@ -75,6 +76,7 @@ func newEditForm(connection domain.Connection) connectionForm {
 }
 
 func newConnectionForm(mode formMode, original domain.Connection, values formValues) connectionForm {
+	values = sanitizeFormValues(values)
 	shared := &values
 	name := huh.NewInput().
 		Key("name").
@@ -118,7 +120,7 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 	rdpGroup := huh.NewGroup(
 		huh.NewInput().Key("rdp_client").Title("Client").Value(&shared.RDPClient),
 		huh.NewConfirm().Key("rdp_fullscreen").Title("Fullscreen").Value(&shared.RDPFullscreen),
-		huh.NewConfirm().Key("rdp_ignore_certificate").Title("Ignore certificate").Value(&shared.RDPIgnoreCertificate),
+		huh.NewConfirm().Key("rdp_ignore_certificate").Title("Ignore certificate (INSECURE)").Value(&shared.RDPIgnoreCertificate),
 	).Title("RDP options").Description("Optional fields · Ctrl+S skips this section").WithHideFunc(func() bool {
 		return !strings.EqualFold(strings.TrimSpace(shared.Protocol), string(domain.ProtocolRDP))
 	})
@@ -231,14 +233,18 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 	if f.form == nil {
 		return f, nil
 	}
+	if keyPress, ok := msg.(tea.KeyPressMsg); ok && keyPress.String() == "ctrl+v" {
+		return f, nil
+	}
 	if f.liveValues != nil {
 		*f.liveValues = f.values
 	}
-	updated, command := f.form.Update(msg)
+	updated, command := f.form.Update(sanitizeTextMessage(msg))
 	if form, ok := updated.(*huh.Form); ok {
 		f.form = form
 	}
 	f.syncValues()
+	f.sanitizeValues()
 	return f, command
 }
 
@@ -270,6 +276,7 @@ func (f connectionForm) Candidate() (domain.Candidate, error) {
 	}
 	if f.mode == formEdit {
 		candidate.Source = f.original.Endpoint.Source
+		candidate.Metadata = domain.CloneMetadata(f.original.Metadata)
 	}
 
 	normalized, err := domain.NormalizeCandidate(candidate)
@@ -303,18 +310,7 @@ func (f connectionForm) options() domain.Options {
 	switch protocol {
 	case string(domain.ProtocolSSH):
 		delete(options, rdpoptions.Namespace)
-		values := make(map[string]string, 4)
-		if existing := options[sshoptions.Namespace]; existing != nil {
-			// These references are managed by discovery and are intentionally
-			// not exposed in the form. Preserve them when editing a persisted
-			// copy of an SSH alias so it keeps OpenSSH's full configuration.
-			if value := existing[sshoptions.ConfigFile]; value != "" {
-				values[sshoptions.ConfigFile] = value
-				if alias := existing[sshoptions.HostAlias]; alias != "" {
-					values[sshoptions.HostAlias] = alias
-				}
-			}
-		}
+		values := make(map[string]string, 2)
 		if strings.TrimSpace(f.values.SSHIdentityFile) != "" {
 			values[sshoptions.IdentityFile] = strings.TrimSpace(f.values.SSHIdentityFile)
 		}
@@ -365,9 +361,46 @@ func (f connectionForm) View() string {
 		return ""
 	}
 	if f.liveValues != nil {
-		*f.liveValues = f.values
+		*f.liveValues = sanitizeFormValues(f.values)
 	}
 	return f.form.View()
+}
+
+func (f *connectionForm) sanitizeValues() {
+	if f.liveValues == nil {
+		return
+	}
+	f.values = sanitizeFormValues(f.values)
+	*f.liveValues = f.values
+}
+
+func sanitizeTextMessage(message tea.Msg) tea.Msg {
+	switch message := message.(type) {
+	case tea.KeyPressMsg:
+		if message.Text != "" {
+			message.Text = terminal.EscapeControls(message.Text)
+		}
+		return message
+	case tea.PasteMsg:
+		message.Content = terminal.EscapeControls(message.Content)
+		return message
+	default:
+		return message
+	}
+}
+
+func sanitizeFormValues(values formValues) formValues {
+	values.Name = terminal.EscapeControls(values.Name)
+	values.Protocol = terminal.EscapeControls(values.Protocol)
+	values.Host = terminal.EscapeControls(values.Host)
+	values.Port = terminal.EscapeControls(values.Port)
+	values.User = terminal.EscapeControls(values.User)
+	values.Description = terminal.EscapeControls(values.Description)
+	values.Tags = terminal.EscapeControls(values.Tags)
+	values.SSHIdentityFile = terminal.EscapeControls(values.SSHIdentityFile)
+	values.SSHProxyJump = terminal.EscapeControls(values.SSHProxyJump)
+	values.RDPClient = terminal.EscapeControls(values.RDPClient)
+	return values
 }
 
 type duplicateForm struct {
@@ -377,7 +410,7 @@ type duplicateForm struct {
 }
 
 func newDuplicateForm(source domain.Connection) duplicateForm {
-	name := source.Name + "-copy"
+	name := terminal.EscapeControls(source.Name + "-copy")
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().Key("name").Title("Name").Value(&name).Validate(required("name")),
@@ -391,7 +424,10 @@ func (f duplicateForm) Update(msg tea.Msg) (duplicateForm, tea.Cmd) {
 	if f.form == nil {
 		return f, nil
 	}
-	updated, command := f.form.Update(msg)
+	if keyPress, ok := msg.(tea.KeyPressMsg); ok && keyPress.String() == "ctrl+v" {
+		return f, nil
+	}
+	updated, command := f.form.Update(sanitizeTextMessage(msg))
 	if form, ok := updated.(*huh.Form); ok {
 		f.form = form
 	}

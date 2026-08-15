@@ -7,9 +7,23 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/Alurith/hoplane/internal/safeio"
+	"github.com/Alurith/hoplane/internal/sshoptions"
 	"gopkg.in/yaml.v3"
 )
+
+const (
+	MaxBytes       int64 = 1 << 20
+	MaxConnections       = 4096
+)
+
+var configFilePolicy = safeio.Policy{
+	MaxBytes:       MaxBytes,
+	RequireOwner:   true,
+	RequirePrivate: true,
+}
 
 func DefaultPath() (string, error) {
 	directory, err := os.UserConfigDir()
@@ -20,7 +34,13 @@ func DefaultPath() (string, error) {
 }
 
 func Load(path string) (File, error) {
-	contents, err := os.ReadFile(path)
+	if err := safeio.ValidateAncestors(path); err != nil {
+		return File{}, fmt.Errorf("validate config path: %w", err)
+	}
+	if err := validateConfigDirectoryForLoad(path); err != nil {
+		return File{}, err
+	}
+	contents, err := safeio.ReadFile(path, configFilePolicy)
 	if errors.Is(err, os.ErrNotExist) {
 		return NewFile(), nil
 	}
@@ -43,13 +63,37 @@ func Load(path string) (File, error) {
 		return File{}, fmt.Errorf("parse config %q: %w", path, err)
 	}
 
+	if len(file.Connections) > MaxConnections {
+		return File{}, fmt.Errorf("config %q contains too many connections (max %d)", path, MaxConnections)
+	}
 	if file.Version != CurrentVersion {
 		return File{}, fmt.Errorf("config %q has unsupported version %d, want %d", path, file.Version, CurrentVersion)
+	}
+	if err := validatePersistedFile(file); err != nil {
+		return File{}, fmt.Errorf("validate config %q: %w", path, err)
 	}
 	if file.Connections == nil {
 		file.Connections = []Entry{}
 	}
 	return file, nil
+}
+
+func validateConfigDirectoryForLoad(path string) error {
+	directory := filepath.Dir(path)
+	err := safeio.ValidateDirectory(directory, safeio.Policy{
+		RequireOwner:          true,
+		RejectGroupOtherWrite: true,
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("validate config directory: %w", err)
+	}
+	if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf("validate config directory: %w", err)
 }
 
 func Save(path string, file File) error {
@@ -62,15 +106,33 @@ func Save(path string, file File) error {
 	if file.Connections == nil {
 		file.Connections = []Entry{}
 	}
+	if len(file.Connections) > MaxConnections {
+		return fmt.Errorf("config contains too many connections (max %d)", MaxConnections)
+	}
+	if err := validatePersistedFile(file); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
 
 	contents, err := yaml.Marshal(file)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
+	if int64(len(contents)) > MaxBytes {
+		return fmt.Errorf("encode config: %w", safeio.ErrTooLarge)
+	}
 
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
+	}
+	if err := safeio.ValidateAncestors(path); err != nil {
+		return fmt.Errorf("validate config path: %w", err)
+	}
+	if err := safeio.EnsurePrivateDirectory(directory); err != nil {
+		return fmt.Errorf("validate config directory: %w", err)
+	}
+	if err := safeio.Validate(path, configFilePolicy); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("validate existing config: %w", err)
 	}
 
 	temporary, err := os.CreateTemp(directory, ".config-*.yaml")
@@ -96,15 +158,42 @@ func Save(path string, file File) error {
 		return fmt.Errorf("close temporary config: %w", err)
 	}
 
-	if err := os.Rename(temporaryPath, path); err != nil {
-		// Windows does not replace an existing file with Rename. The fallback
-		// keeps the write usable on that platform, while Unix stays atomic.
-		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return fmt.Errorf("replace config: %w", err)
-		}
-		if renameErr := os.Rename(temporaryPath, path); renameErr != nil {
-			return fmt.Errorf("replace config: %w", renameErr)
+	if err := replaceFile(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
+}
+
+func validatePersistedFile(file File) error {
+	for index, entry := range file.Connections {
+		for namespace, values := range entry.Options {
+			for key := range values {
+				if namespace == sshoptions.Namespace && (key == sshoptions.ConfigFile || key == sshoptions.HostAlias) {
+					return fmt.Errorf("connection %d: SSH option %q is source metadata and cannot be persisted", index, key)
+				}
+				if isSensitiveOptionKey(key) {
+					return fmt.Errorf("connection %d: option %q cannot contain persisted secrets", index, key)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func isSensitiveOptionKey(key string) bool {
+	parts := strings.FieldsFunc(strings.ToLower(key), func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	})
+	for _, part := range parts {
+		switch part {
+		case "password", "passphrase", "secret", "token", "credential", "credentials":
+			return true
+		}
+	}
+	for index, part := range parts {
+		if part == "private" && index+1 < len(parts) && parts[index+1] == "key" {
+			return true
+		}
+	}
+	return false
 }

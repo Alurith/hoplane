@@ -25,14 +25,9 @@ func (s *commandState) newConnectCommand() *cobra.Command {
 }
 
 func (s *commandState) connect(ctx context.Context, name string, dryRun bool) error {
-	catalog, err := s.loadCatalog(ctx)
+	connection, err := s.findConnection(ctx, name)
 	if err != nil {
 		return err
-	}
-
-	connection, ok := catalog.Find(name)
-	if !ok {
-		return fmt.Errorf("connection %q not found", name)
 	}
 
 	return s.connectConnection(ctx, connection, connector.ConnectOptions{DryRun: dryRun})

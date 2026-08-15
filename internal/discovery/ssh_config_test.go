@@ -43,8 +43,8 @@ Host web? wildcard
 	if candidates[0].Source.Name != "ssh-config" || candidates[0].Source.ID == "" {
 		t.Fatalf("source = %#v", candidates[0].Source)
 	}
-	if candidates[0].Options[sshoptions.Namespace][sshoptions.HostAlias] != "nas" {
-		t.Fatalf("options = %#v", candidates[0].Options)
+	if candidates[0].Metadata[sshoptions.Namespace][sshoptions.HostAlias] != "nas" {
+		t.Fatalf("metadata = %#v", candidates[0].Metadata)
 	}
 }
 
@@ -73,7 +73,8 @@ func TestSSHConfigSourceDiscoversIncludes(t *testing.T) {
 		t.Fatalf("WriteFile() included error = %v", err)
 	}
 	main := filepath.Join(directory, "config")
-	if err := os.WriteFile(main, []byte("Include conf.d/*.conf\nHost home\n"), 0o600); err != nil {
+	includePattern := filepath.Join(directory, "conf.d", "*.conf")
+	if err := os.WriteFile(main, []byte("Include "+includePattern+"\nHost home\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() main error = %v", err)
 	}
 
@@ -83,6 +84,29 @@ func TestSSHConfigSourceDiscoversIncludes(t *testing.T) {
 	}
 	if got := []string{candidates[0].Name, candidates[1].Name}; !reflect.DeepEqual(got, []string{"work", "home"}) {
 		t.Fatalf("aliases = %#v", got)
+	}
+}
+
+func TestSSHConfigSourceRelativeIncludesUseSSHHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	included := filepath.Join(home, ".ssh", "conf.d", "work.conf")
+	if err := os.MkdirAll(filepath.Dir(included), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(included, []byte("Host work\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() included error = %v", err)
+	}
+	main := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(main, []byte("Include conf.d/*.conf\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() main error = %v", err)
+	}
+	candidates, err := NewSSHConfigSource(main).Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Name != "work" {
+		t.Fatalf("candidates = %#v, want work alias from ~/.ssh", candidates)
 	}
 }
 

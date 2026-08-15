@@ -2,18 +2,36 @@ package discovery
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/safeio"
 	"github.com/Alurith/hoplane/internal/sshoptions"
 )
+
+const (
+	sshDiscoveryTimeout = 3 * time.Second
+	maxSSHFileBytes     = 1 << 20
+	maxSSHTotalBytes    = 8 << 20
+	maxSSHLineBytes     = 64 << 10
+	maxSSHFiles         = 128
+	maxSSHIncludeDepth  = 16
+	maxSSHPatterns      = 256
+	maxSSHMatches       = 512
+	maxSSHAliases       = 4096
+)
+
+var sshFilePolicy = safeio.SSHConfigPolicy(maxSSHFileBytes)
 
 // SSHConfigSource exposes concrete aliases from an OpenSSH config. It only
 // enumerates aliases; the ssh client remains authoritative for config
@@ -37,6 +55,9 @@ func DefaultSSHConfigPath() (string, error) {
 func (SSHConfigSource) Name() string { return "ssh-config" }
 
 func (s SSHConfigSource) Discover(ctx context.Context) ([]domain.Candidate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -48,7 +69,9 @@ func (s SSHConfigSource) Discover(ctx context.Context) ([]domain.Candidate, erro
 	if err != nil {
 		return nil, fmt.Errorf("resolve SSH config path %q: %w", s.path, err)
 	}
-	aliases, err := discoverAliases(ctx, path)
+	discoveryContext, cancel := context.WithTimeout(ctx, sshDiscoveryTimeout)
+	defer cancel()
+	aliases, err := discoverAliases(discoveryContext, path)
 	if errors.Is(err, os.ErrNotExist) {
 		return []domain.Candidate{}, nil
 	}
@@ -59,7 +82,7 @@ func (s SSHConfigSource) Discover(ctx context.Context) ([]domain.Candidate, erro
 	source := domain.SourceRef{Name: s.Name(), ID: path}
 	candidates := make([]domain.Candidate, 0, len(aliases))
 	for _, alias := range aliases {
-		if err := ctx.Err(); err != nil {
+		if err := discoveryContext.Err(); err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, domain.Candidate{
@@ -67,31 +90,48 @@ func (s SSHConfigSource) Discover(ctx context.Context) ([]domain.Candidate, erro
 			Protocol: string(domain.ProtocolSSH),
 			Host:     alias,
 			Source:   source,
-			Options:  sshoptions.ConfigReference(path, alias),
+			Metadata: sshoptions.NewConfigReference(path, alias),
 		})
 	}
 	return candidates, nil
 }
 
-func discoverAliases(ctx context.Context, path string) ([]string, error) {
-	aliases := make([]string, 0)
-	seenAliases := make(map[string]struct{})
-	visitedFiles := make(map[string]struct{})
-	if err := parseSSHConfigFile(ctx, path, visitedFiles, seenAliases, &aliases); err != nil {
-		return nil, err
-	}
-	return aliases, nil
+type sshParseState struct {
+	ctx            context.Context
+	includeBaseDir string
+	visitedFiles   map[string]struct{}
+	seenAliases    map[string]struct{}
+	aliases        []string
+	totalBytes     int64
+	fileCount      int
+	patternCount   int
+	matchCount     int
 }
 
-func parseSSHConfigFile(
-	ctx context.Context,
-	path string,
-	visitedFiles map[string]struct{},
-	seenAliases map[string]struct{},
-	aliases *[]string,
-) error {
-	if err := ctx.Err(); err != nil {
+func discoverAliases(ctx context.Context, path string) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory for SSH Include: %w", err)
+	}
+	state := &sshParseState{
+		ctx:            ctx,
+		includeBaseDir: filepath.Join(home, ".ssh"),
+		visitedFiles:   make(map[string]struct{}),
+		seenAliases:    make(map[string]struct{}),
+		aliases:        make([]string, 0),
+	}
+	if err := state.parseFile(path, 0); err != nil {
+		return nil, err
+	}
+	return state.aliases, nil
+}
+
+func (s *sshParseState) parseFile(path string, depth int) error {
+	if err := s.ctx.Err(); err != nil {
 		return err
+	}
+	if depth > maxSSHIncludeDepth {
+		return fmt.Errorf("SSH Include nesting exceeds %d levels", maxSSHIncludeDepth)
 	}
 
 	absolutePath, err := filepath.Abs(path)
@@ -99,28 +139,48 @@ func parseSSHConfigFile(
 		return fmt.Errorf("resolve included SSH config %q: %w", path, err)
 	}
 	absolutePath = filepath.Clean(absolutePath)
-	if _, seen := visitedFiles[absolutePath]; seen {
+	if err := safeio.Validate(absolutePath, sshFilePolicy); err != nil {
+		return err
+	}
+	canonicalPath, err := filepath.EvalSymlinks(absolutePath)
+	if err != nil {
+		return fmt.Errorf("resolve SSH config %q: %w", absolutePath, err)
+	}
+	canonicalPath = filepath.Clean(canonicalPath)
+	if _, seen := s.visitedFiles[canonicalPath]; seen {
 		return nil
 	}
-	visitedFiles[absolutePath] = struct{}{}
+	if s.fileCount >= maxSSHFiles {
+		return fmt.Errorf("SSH config includes exceed %d files", maxSSHFiles)
+	}
+	s.fileCount++
+	s.visitedFiles[canonicalPath] = struct{}{}
 
-	file, err := os.Open(absolutePath)
+	remaining := maxSSHTotalBytes - s.totalBytes
+	if remaining <= 0 {
+		return fmt.Errorf("SSH config data exceeds %d bytes", maxSSHTotalBytes)
+	}
+	policy := sshFilePolicy
+	if remaining < policy.MaxBytes {
+		policy.MaxBytes = remaining
+	}
+	contents, err := safeio.ReadFile(canonicalPath, policy)
 	if err != nil {
 		return err
 	}
-	defer file.Close() //nolint:errcheck
+	s.totalBytes += int64(len(contents))
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	scanner := bufio.NewScanner(bytes.NewReader(contents))
+	scanner.Buffer(make([]byte, 1024), maxSSHLineBytes)
 	lineNumber := 0
 	for scanner.Scan() {
-		lineNumber++
-		if err := ctx.Err(); err != nil {
+		if err := s.ctx.Err(); err != nil {
 			return err
 		}
+		lineNumber++
 		fields, err := splitSSHFields(scanner.Text())
 		if err != nil {
-			return fmt.Errorf("%s:%d: %w", absolutePath, lineNumber, err)
+			return fmt.Errorf("%s:%d: %w", canonicalPath, lineNumber, err)
 		}
 		if len(fields) == 0 {
 			continue
@@ -129,59 +189,155 @@ func parseSSHConfigFile(
 		switch strings.ToLower(fields[0]) {
 		case "host":
 			if len(fields) == 1 {
-				return fmt.Errorf("%s:%d: Host requires at least one pattern", absolutePath, lineNumber)
+				return fmt.Errorf("%s:%d: Host requires at least one pattern", canonicalPath, lineNumber)
 			}
 			for _, pattern := range fields[1:] {
 				if !isConcreteAlias(pattern) {
 					continue
 				}
 				key := strings.ToLower(pattern)
-				if _, seen := seenAliases[key]; seen {
+				if _, seen := s.seenAliases[key]; seen {
 					continue
 				}
-				seenAliases[key] = struct{}{}
-				*aliases = append(*aliases, pattern)
+				if len(s.aliases) >= maxSSHAliases {
+					return fmt.Errorf("SSH config contains more than %d aliases", maxSSHAliases)
+				}
+				s.seenAliases[key] = struct{}{}
+				s.aliases = append(s.aliases, pattern)
 			}
 		case "include":
-			if err := parseIncludes(ctx, filepath.Dir(absolutePath), fields[1:], visitedFiles, seenAliases, aliases); err != nil {
-				return fmt.Errorf("%s:%d: %w", absolutePath, lineNumber, err)
+			if err := s.parseIncludes(s.includeBaseDir, fields[1:], depth+1); err != nil {
+				return fmt.Errorf("%s:%d: %w", canonicalPath, lineNumber, err)
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan %q: %w", absolutePath, err)
+		return fmt.Errorf("scan %q: %w", canonicalPath, err)
 	}
 	return nil
 }
 
-func parseIncludes(
-	ctx context.Context,
-	baseDirectory string,
-	patterns []string,
-	visitedFiles map[string]struct{},
-	seenAliases map[string]struct{},
-	aliases *[]string,
-) error {
+func (s *sshParseState) parseIncludes(baseDirectory string, patterns []string, depth int) error {
 	for _, pattern := range patterns {
-		if err := ctx.Err(); err != nil {
+		if err := s.ctx.Err(); err != nil {
 			return err
 		}
+		if s.patternCount >= maxSSHPatterns {
+			return fmt.Errorf("SSH config contains more than %d Include patterns", maxSSHPatterns)
+		}
+		s.patternCount++
 		path, err := expandConfigPath(pattern, baseDirectory)
 		if err != nil {
 			return err
 		}
-		matches, err := filepath.Glob(path)
+		matches, err := limitedGlob(s.ctx, path, maxSSHMatches-s.matchCount)
 		if err != nil {
 			return fmt.Errorf("invalid Include pattern %q: %w", pattern, err)
 		}
 		sort.Strings(matches)
+		s.matchCount += len(matches)
 		for _, match := range matches {
-			if err := parseSSHConfigFile(ctx, match, visitedFiles, seenAliases, aliases); err != nil {
+			if err := s.parseFile(match, depth); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func limitedGlob(ctx context.Context, pattern string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("glob match limit exceeded")
+	}
+	volume := filepath.VolumeName(pattern)
+	rest := strings.TrimPrefix(pattern, volume)
+	current := volume
+	if filepath.IsAbs(pattern) {
+		current += string(filepath.Separator)
+		rest = strings.TrimLeft(rest, string(filepath.Separator))
+	} else {
+		current = "."
+	}
+	components := make([]string, 0)
+	for _, component := range strings.Split(rest, string(filepath.Separator)) {
+		if component != "" {
+			components = append(components, component)
+		}
+	}
+
+	matches := make([]string, 0)
+	var walk func(string, int) error
+	walk = func(path string, index int) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if index == len(components) {
+			if err := safeio.Validate(path, sshFilePolicy); errors.Is(err, os.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			if len(matches) >= limit {
+				return fmt.Errorf("glob match limit exceeded")
+			}
+			matches = append(matches, filepath.Clean(path))
+			return nil
+		}
+
+		component := components[index]
+		if component == "." {
+			return walk(path, index+1)
+		}
+		if component == ".." {
+			return walk(filepath.Join(path, component), index+1)
+		}
+		if !strings.ContainsAny(component, "*?[") {
+			next := filepath.Join(path, component)
+			if _, err := os.Lstat(next); errors.Is(err, os.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			return walk(next, index+1)
+		}
+
+		directory, err := safeio.OpenDirectory(path, sshFilePolicy)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		defer directory.Close() //nolint:errcheck
+		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			entries, err := directory.ReadDir(64)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				matched, err := filepath.Match(component, entry.Name())
+				if err != nil {
+					return err
+				}
+				if matched {
+					if err := walk(filepath.Join(path, entry.Name()), index+1); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(current, 0); err != nil {
+		return nil, err
+	}
+	return matches, nil
 }
 
 func expandConfigPath(value, baseDirectory string) (string, error) {
@@ -212,7 +368,7 @@ func isConcreteAlias(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return false
 		}
 	}

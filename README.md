@@ -60,13 +60,15 @@ connections:
         proxy_jump: bastion
 ```
 
-SSH aliases from `~/.ssh/config` are available automatically. Use `--ssh-config` to select another OpenSSH config file. The connector delegates agent authentication, local key loading, and config semantics to the installed `ssh` client.
+SSH aliases from `~/.ssh/config` are available automatically. Use `--ssh-config` to select another OpenSSH config file. OpenSSH configuration is trusted executable input: directives such as `ProxyCommand`, `Match exec`, `Include`, and forwarding remain authoritative and may run local commands or change network behavior. Do not use a configuration or catalog supplied by an untrusted party.
 
 Known default ports are SSH `22`, RDP `3389`, and VNC `5900`. Other protocols require an explicit port.
 
 RDP connections run on Linux through `xfreerdp`. The `add` command supports
 `--rdp-client`, `--rdp-fullscreen`, and `--rdp-ignore-certificate`; these flags
-are persisted in the `rdp` options namespace. Passwords and secrets are never
+are persisted in the `rdp` options namespace. `--rdp-ignore-certificate` is
+insecure and should only be used for explicitly trusted test environments;
+certificate validation is enabled by default. Passwords and secrets are never
 written to YAML or passed on the command line. If `xfreerdp` is not installed,
 `connect` reports a required-client error without starting a process. `--dry-run`
 only prints the planned invocation, so it does not require `xfreerdp` to be installed.

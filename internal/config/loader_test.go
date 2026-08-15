@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Alurith/hoplane/internal/domain"
@@ -50,6 +51,36 @@ func TestLoadRejectsMultipleYAMLDocuments(t *testing.T) {
 
 	if _, err := Load(path); err == nil {
 		t.Fatal("Load() error = nil, want multiple-document error")
+	}
+}
+
+func TestLoadRejectsReservedAndSensitiveOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	contents := "version: 1\nconnections:\n  - name: unsafe\n    protocol: ssh\n    host: example.com\n    options:\n      ssh:\n        config_file: /tmp/ssh-config\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() error = nil, want reserved metadata rejection")
+	}
+
+	file := NewFile()
+	file.Connections = []Entry{{
+		Name:     "secret",
+		Protocol: "ssh",
+		Host:     "example.com",
+		Options:  domain.Options{"ssh": {"api_token": "secret"}},
+	}}
+	if err := Save(filepath.Join(t.TempDir(), "config.yaml"), file); err == nil {
+		t.Fatal("Save() error = nil, want sensitive option rejection")
+	}
+}
+
+func TestSaveRejectsOversizedConfig(t *testing.T) {
+	file := NewFile()
+	file.Connections = []Entry{{Name: "large", Protocol: "ssh", Host: "example.com", Description: strings.Repeat("x", int(MaxBytes))}}
+	if err := Save(filepath.Join(t.TempDir(), "config.yaml"), file); err == nil {
+		t.Fatal("Save() error = nil, want size limit error")
 	}
 }
 

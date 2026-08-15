@@ -97,7 +97,7 @@ func TestRegistryDryRunUsesPlannerWithoutExecutingConnector(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	const want = "dry-run: connection \"nas\" would execute ssh -p 22 nas.local\n"
+	const want = "dry-run: connection \"nas\" would execute ssh -p 22 -- nas.local\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}

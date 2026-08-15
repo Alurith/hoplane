@@ -39,7 +39,7 @@ func TestConnectDryRun(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	const want = "dry-run: connection \"nas\" would execute ssh -p 22 alice@nas.local\n"
+	const want = "dry-run: connection \"nas\" would execute ssh -p 22 -l alice -- nas.local\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
@@ -99,7 +99,7 @@ func TestConnectSSHConfigAliasDryRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	want := "dry-run: connection \"nas\" would execute ssh -F " + sshPath + " nas\n"
+	want := "dry-run: connection \"nas\" would execute ssh -F " + sshPath + " -- nas\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}

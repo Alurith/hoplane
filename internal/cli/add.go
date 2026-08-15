@@ -38,13 +38,6 @@ func (s *commandState) newAddCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			file, err := config.Load(path)
-			if err != nil {
-				return err
-			}
-			if connectionNameExists(file.Connections, name) {
-				return fmt.Errorf("connection %q already exists", name)
-			}
 			sshPath, err := s.sshPath()
 			if err != nil {
 				return err
@@ -119,8 +112,13 @@ func (s *commandState) newAddCommand() *cobra.Command {
 			if err := validateProtocolOptions(connection); err != nil {
 				return err
 			}
-			file.Connections = append(file.Connections, config.EntryFromConnection(connection))
-			if err := config.Save(path, file); err != nil {
+			if err := config.Update(cmd.Context(), path, func(file *config.File) error {
+				if connectionNameExists(file.Connections, connection.Name) {
+					return fmt.Errorf("connection %q already exists", connection.Name)
+				}
+				file.Connections = append(file.Connections, config.EntryFromConnection(connection))
+				return nil
+			}); err != nil {
 				return err
 			}
 			return output.WriteConnection(s.dependencies.Output, connection)
@@ -137,6 +135,6 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	flags.StringVar(&proxyJump, "proxy-jump", "", "SSH proxy jump target")
 	flags.StringVar(&rdpClient, "rdp-client", "", "RDP client (currently xfreerdp)")
 	flags.BoolVar(&rdpFullscreen, "rdp-fullscreen", false, "start RDP in fullscreen")
-	flags.BoolVar(&rdpIgnoreCertificate, "rdp-ignore-certificate", false, "ignore the RDP server certificate")
+	flags.BoolVar(&rdpIgnoreCertificate, "rdp-ignore-certificate", false, "INSECURE: ignore the RDP server certificate")
 	return command
 }

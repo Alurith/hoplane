@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/terminal"
 )
 
 type screen uint8
@@ -60,9 +61,10 @@ type model struct {
 	pendingName     string
 	pendingIndex    int
 	pendingSelected bool
+	warnings        []string
 }
 
-func NewModel(ctx context.Context, connections []domain.Connection, editor ConnectionEditor) model {
+func NewModel(ctx context.Context, connections []domain.Connection, editor ConnectionEditor, warnings ...string) model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -84,16 +86,18 @@ func NewModel(ctx context.Context, connections []domain.Connection, editor Conne
 	}
 
 	return model{
-		ctx:    ctx,
-		list:   component,
-		editor: editor,
-		mode:   screenList,
+		ctx:      ctx,
+		list:     component,
+		editor:   editor,
+		mode:     screenList,
+		warnings: append([]string(nil), warnings...),
 	}
 }
 
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	msg = sanitizeTextMessage(msg)
 	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.list.SetSize(message.Width, message.Height)
@@ -431,8 +435,15 @@ func (m model) View() tea.View {
 	default:
 		content = m.list.View()
 	}
+	if m.mode == screenList && len(m.warnings) > 0 {
+		warnings := make([]string, 0, len(m.warnings))
+		for _, warning := range m.warnings {
+			warnings = append(warnings, terminal.EscapeControls(warning))
+		}
+		content += "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render("Warnings: "+strings.Join(warnings, " | "))
+	}
 	if m.status != nil {
-		content += "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.status.Error())
+		content += "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(terminal.EscapeControls(m.status.Error()))
 	}
 	if m.quitting {
 		content = ""
@@ -459,6 +470,7 @@ func Pick(
 	editor ConnectionEditor,
 	input io.Reader,
 	output io.Writer,
+	warnings ...string,
 ) (domain.Connection, Action, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -467,7 +479,7 @@ func Pick(
 	defer cancel()
 
 	program := tea.NewProgram(
-		NewModel(programContext, connections, editor),
+		NewModel(programContext, connections, editor, warnings...),
 		tea.WithContext(programContext),
 		tea.WithInput(input),
 		tea.WithOutput(output),

@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/safeio"
 	"github.com/Alurith/hoplane/internal/sshoptions"
 )
 
@@ -48,10 +49,14 @@ func (c SSHConnector) Plan(connection domain.Connection) (Invocation, error) {
 	if err != nil {
 		return Invocation{}, fmt.Errorf("decode SSH options: %w", err)
 	}
+	metadata, err := sshoptions.DecodeMetadata(connection.Metadata)
+	if err != nil && connection.Metadata != nil {
+		return Invocation{}, fmt.Errorf("decode SSH metadata: %w", err)
+	}
 
-	args := make([]string, 0, 10)
-	if options.ConfigFile != "" {
-		path, err := expandUserPath(options.ConfigFile)
+	args := make([]string, 0, 12)
+	if metadata.ConfigFile != "" {
+		path, err := expandUserPath(metadata.ConfigFile)
 		if err != nil {
 			return Invocation{}, fmt.Errorf("resolve SSH config path: %w", err)
 		}
@@ -68,17 +73,16 @@ func (c SSHConnector) Plan(connection domain.Connection) (Invocation, error) {
 		args = append(args, "-J", options.ProxyJump)
 	}
 
-	if options.HostAlias != "" {
+	if metadata.HostAlias != "" {
 		// Do not override the alias's User or Port. OpenSSH must apply the
 		// complete configuration for the alias, including HostName and Match.
-		args = append(args, options.HostAlias)
+		args = append(args, "--", metadata.HostAlias)
 	} else {
 		args = append(args, "-p", strconv.FormatUint(uint64(connection.Endpoint.Port), 10))
-		target := connection.Endpoint.Host
 		if connection.Endpoint.User != "" {
-			target = connection.Endpoint.User + "@" + target
+			args = append(args, "-l", connection.Endpoint.User)
 		}
-		args = append(args, target)
+		args = append(args, "--", connection.Endpoint.Host)
 	}
 
 	return Invocation{Program: "ssh", Args: args}, nil
@@ -97,6 +101,19 @@ func (c SSHConnector) Connect(
 	if err != nil {
 		return err
 	}
+	snapshotPath, cleanup, err := snapshotSSHConfigReference(connection)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+		for index := range invocation.Args {
+			if invocation.Args[index] == "-F" && index+1 < len(invocation.Args) {
+				invocation.Args[index+1] = snapshotPath
+				break
+			}
+		}
+	}
 
 	program, err := c.runner.LookPath(invocation.Program)
 	if err != nil {
@@ -113,6 +130,25 @@ func (c SSHConnector) Connect(
 		return fmt.Errorf("run ssh: %w", err)
 	}
 	return nil
+}
+
+func snapshotSSHConfigReference(connection domain.Connection) (string, func(), error) {
+	if connection.Metadata == nil {
+		return "", nil, nil
+	}
+	metadata, err := sshoptions.DecodeMetadata(connection.Metadata)
+	if err != nil {
+		return "", nil, fmt.Errorf("decode SSH metadata: %w", err)
+	}
+	path, err := expandUserPath(metadata.ConfigFile)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve SSH config path: %w", err)
+	}
+	snapshot, cleanup, err := safeio.SnapshotFile(path, safeio.SSHConfigPolicy(1<<20))
+	if err != nil {
+		return "", nil, fmt.Errorf("snapshot SSH config path: %w", err)
+	}
+	return snapshot, cleanup, nil
 }
 
 func expandUserPath(value string) (string, error) {

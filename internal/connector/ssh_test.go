@@ -54,9 +54,22 @@ func TestSSHConnectorPlansInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	want := Invocation{Program: "ssh", Args: []string{"-p", "2222", "alice@nas.local"}}
+	want := Invocation{Program: "ssh", Args: []string{"-p", "2222", "-l", "alice", "--", "nas.local"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Plan() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSSHConnectorPassesOptionLikeUserAsLoginValue(t *testing.T) {
+	got, err := NewSSHConnector(&fakeRunner{}).Plan(domain.Connection{
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "example.com", Port: 22, User: "-V"},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := []string{"-p", "22", "-l", "-V", "--", "example.com"}
+	if !reflect.DeepEqual(got.Args, want) {
+		t.Fatalf("args = %#v, want %#v", got.Args, want)
 	}
 }
 
@@ -75,7 +88,7 @@ func TestSSHConnectorPlansDirectIPv6WithoutBrackets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	want := Invocation{Program: "ssh", Args: []string{"-p", "2222", "alice@2001:db8::10"}}
+	want := Invocation{Program: "ssh", Args: []string{"-p", "2222", "-l", "alice", "--", "2001:db8::10"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Plan() = %#v, want %#v", got, want)
 	}
@@ -104,7 +117,7 @@ func TestSSHConnectorPlansSSHOptions(t *testing.T) {
 	}
 	want := Invocation{
 		Program: "ssh",
-		Args:    []string{"-i", "/home/alice/.ssh/id_ed25519", "-J", "bastion", "-p", "2222", "alice@nas.local"},
+		Args:    []string{"-i", "/home/alice/.ssh/id_ed25519", "-J", "bastion", "-p", "2222", "-l", "alice", "--", "nas.local"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Plan() = %#v, want %#v", got, want)
@@ -120,7 +133,7 @@ func TestSSHConnectorPlansConfigAliasWithoutOverrides(t *testing.T) {
 			Host:     "nas",
 			Port:     22,
 		},
-		Options: domain.Options{
+		Metadata: domain.Metadata{
 			"ssh": {
 				"config_file": configPath,
 				"host_alias":  "nas",
@@ -132,7 +145,7 @@ func TestSSHConnectorPlansConfigAliasWithoutOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	want := Invocation{Program: "ssh", Args: []string{"-F", configPath, "nas"}}
+	want := Invocation{Program: "ssh", Args: []string{"-F", configPath, "--", "nas"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Plan() = %#v, want %#v", got, want)
 	}
@@ -154,8 +167,8 @@ func TestSSHConnectorExpandsIdentityFileHome(t *testing.T) {
 		t.Fatalf("Plan() error = %v", err)
 	}
 	want := filepath.Join(home, ".ssh", "id_ed25519")
-	if !reflect.DeepEqual(got.Args, []string{"-i", want, "-p", "22", "nas.local"}) {
-		t.Fatalf("args = %#v, want %#v", got.Args, []string{"-i", want, "-p", "22", "nas.local"})
+	if !reflect.DeepEqual(got.Args, []string{"-i", want, "-p", "22", "--", "nas.local"}) {
+		t.Fatalf("args = %#v, want %#v", got.Args, []string{"-i", want, "-p", "22", "--", "nas.local"})
 	}
 }
 
@@ -197,7 +210,7 @@ func TestSSHConnectorForwardsStreamsAndRunsProcess(t *testing.T) {
 	if runner.invocation.Program != "/usr/bin/ssh" {
 		t.Fatalf("program = %q, want /usr/bin/ssh", runner.invocation.Program)
 	}
-	if !reflect.DeepEqual(runner.invocation.Args, []string{"-p", "22", "nas.local"}) {
+	if !reflect.DeepEqual(runner.invocation.Args, []string{"-p", "22", "--", "nas.local"}) {
 		t.Fatalf("args = %#v", runner.invocation.Args)
 	}
 	if runner.streams.Input != input || runner.streams.Output != &output || runner.streams.Errors != &diagnostics {
