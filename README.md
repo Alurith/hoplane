@@ -35,6 +35,35 @@ Linux is currently supported, including RDP connections through
 
 ## Installation
 
+### From a GitHub release
+
+Download the matching archive and `checksums.txt` from the
+[latest release](https://github.com/Alurith/hoplane/releases). On Linux:
+
+```bash
+cd ~/Downloads
+VERSION=0.1.1
+ARCHIVE="hoplane_${VERSION}_linux_amd64.tar.gz"
+
+grep "  ${ARCHIVE}$" checksums.txt | sha256sum -c -
+
+tmp=$(mktemp -d)
+tar -xzf "$ARCHIVE" -C "$tmp"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 "$tmp/hoplane" "$HOME/.local/bin/hoplane"
+rm -rf "$tmp"
+```
+
+Use the `arm64` archive on Linux ARM64. Keep `~/.local/bin` in your `PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Installing there keeps the directory writable for `hoplane update`.
+
+### From source
+
 Clone the repository and install the binary:
 
 ```bash
@@ -49,6 +78,8 @@ Alternatively, build a local binary:
 ```bash
 go build -o bin/hoplane ./cmd/hoplane
 ```
+
+Source builds are development builds and cannot self-update.
 
 ## Releases
 
