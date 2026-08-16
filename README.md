@@ -29,7 +29,7 @@ Linux is currently supported, including RDP connections through
 
 ## Requirements
 
-- Go `1.25.12` to build Hoplane
+- Go `1.25.13` to build Hoplane
 - `ssh` available in `PATH` for SSH connections
 - `xfreerdp3` available in `PATH` for RDP connections on Linux
 

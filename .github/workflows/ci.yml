@@ -20,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version-file: go.mod
           cache: true
       - name: Verify modules
         run: go mod verify
@@ -28,9 +28,6 @@ jobs:
         run: go test -race ./...
       - name: Static analysis
         run: go vet ./...
-      - name: Vulnerability scan
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
-
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -45,7 +42,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version-file: go.mod
           cache: true
       - name: Cross-build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
@@ -53,3 +50,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath -o "/tmp/hoplane-${{ matrix.goos }}-${{ matrix.goarch }}" ./cmd/hoplane
+      # Source mode sees go-selfupdate's unused OpenPGP validator; scan the
+      # unstripped target binary to check the code actually linked into it.
+      - name: Vulnerability scan ${{ matrix.goos }}/${{ matrix.goarch }}
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -mode=binary "/tmp/hoplane-${{ matrix.goos }}-${{ matrix.goarch }}"
