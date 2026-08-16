@@ -1,36 +1,164 @@
 # hoplane
 
-A protocol-neutral connection directory for fast terminal-based selection.
+> Keep every remote destination one keystroke away.
 
-The project is inspired by [Charmbracelet Wishlist](https://github.com/charmbracelet/wishlist), but a connection is not implicitly SSH. The target architecture is:
+Hoplane is a fast, focused terminal companion for SSH and RDP. It turns your
+connection list into an organized, searchable workspace, so you can reach the
+right server or desktop in seconds.
 
-```text
-static configuration → normalized endpoints → picker → connector
+It uses the native clients you already trust, never stores passwords or
+credentials, and does not replace OpenSSH or your RDP application. It simply
+makes them easier to access.
+
+## Features
+
+- One organized catalog for SSH and RDP connections
+- Fast terminal-based connection picker
+- Add, edit, duplicate, and remove connections interactively
+- JSON output for scripts and automation
+- Dry-run mode to preview connection commands
+- Custom labels, descriptions, tags, users, and ports
+- Native SSH and RDP client integration
+- Local YAML configuration
+
+## Supported platforms
+
+Linux is currently supported, including RDP connections through
+`xfreerdp3`. Support for additional platforms is in progress.
+
+## Requirements
+
+- Go `1.25.0` to build Hoplane
+- `ssh` available in `PATH` for SSH connections
+- `xfreerdp3` available in `PATH` for RDP connections on Linux
+
+## Installation
+
+Clone the repository and install the binary:
+
+```bash
+git clone https://github.com/Alurith/hoplane.git
+cd hoplane
+
+go install ./cmd/hoplane
 ```
 
-## Current status
+Alternatively, build a local binary:
 
-The first four vertical slices provide:
+```bash
+go build -o bin/hoplane ./cmd/hoplane
+```
 
-- YAML configuration and a Bubble Tea picker
-- `add`, `list`, `show`, and `connect` commands
-- JSON output for automation
-- SSH and RDP connection entries
-- SSH execution through the local OpenSSH client
-- Linux RDP execution through `xfreerdp3`
-- standard OpenSSH agent, key, and local configuration support
+## Quick start
+
+Add an SSH connection:
+
+```bash
+hoplane add nas \
+  --protocol ssh \
+  --host nas.local \
+  --user alice
+```
+
+List your connections:
+
+```bash
+hoplane list
+```
+
+Preview the connection command:
+
+```bash
+hoplane connect nas --dry-run
+```
+
+Connect:
+
+```bash
+hoplane connect nas
+```
+
+Open the interactive picker:
+
+```bash
+hoplane
+```
+
+Add an RDP connection:
+
+```bash
+hoplane add office \
+  --protocol rdp \
+  --host desktop.example.com \
+  --user alice \
+  --rdp-domain CONTOSO \
+  --rdp-fullscreen
+```
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `hoplane` | Open the connection picker |
+| `hoplane pick` | Open the connection picker |
+| `hoplane add <name>` | Add a connection and print it as JSON |
+| `hoplane list` | Print all connections as JSON |
+| `hoplane show <name>` | Print one connection as JSON |
+| `hoplane connect <name>` | Launch the configured client |
+
+Use a custom configuration file with:
+
+```bash
+hoplane --config ./config.yaml list
+```
+
+The `--config` flag also has the short form `-c`.
+
+### `add` options
+
+```text
+--protocol <ssh|rdp>       Connection protocol
+--host <host>              Connection host
+--port <port>              Connection port
+--user <user>              Optional username
+--description <text>       Optional description
+--tag <tag>                Connection tag; may be repeated
+
+--rdp-client <id>          RDP client identifier
+--rdp-domain <domain>      RDP authentication domain
+--rdp-fullscreen           Start RDP in fullscreen
+--rdp-ignore-certificate  Ignore the RDP server certificate
+```
+
+When omitted, the port defaults to:
+
+- SSH: `22`
+- RDP: `3389`
+
+## Interactive picker
+
+The terminal picker lets you quickly browse and manage your connections.
+
+| Key | Action |
+| --- | --- |
+| `Enter` / `c` | Connect |
+| `o` | Add a connection |
+| `i` | Edit the selected connection |
+| `y` | Duplicate the selected connection |
+| `Delete` / `Backspace` | Remove the selected connection |
+| `Ctrl+S` | Skip an optional form section |
+| `Esc` | Cancel the current action |
+| `Ctrl+C` | Exit |
 
 ## Configuration
 
-By default, hoplane reads:
+By default, Hoplane reads:
 
 ```text
 <user config directory>/hoplane/config.yaml
 ```
 
-The path can be overridden with `--config`.
-
-Example:
+Example configuration:
 
 ```yaml
 version: 2
@@ -45,73 +173,166 @@ connections:
       - work
     options:
       rdp:
-        client: xfreerdp3
         domain: CONTOSO
         fullscreen: "true"
-        ignore_certificate: "true"
 
   - name: nas
     protocol: ssh
     host: nas.local
-    port: 22
     user: alice
+    tags:
+      - home
+      - storage
 ```
 
-Hoplane passes standard SSH endpoints to the local `ssh` client. OpenSSH may still use the user's normal agent, keys, and local configuration; Hoplane does not expose separate identity or proxy settings. Known default ports are SSH `22` and RDP `3389`.
+### Connection fields
 
-RDP connections currently run only on Linux, through `xfreerdp3`. The
-`rdp.client` value and `--rdp-client` flag select a logical client ID; when it
-is omitted, Linux defaults to `xfreerdp3`. There is no automatic fallback and
-client paths, programs, extra arguments, and shell commands are not accepted
-from YAML. Windows and macOS retain the RDP model but do not register a client
-yet, so attempting to plan an RDP connection there reports that no platform
-client is registered.
+| Field | Description |
+| --- | --- |
+| `name` | Connection name |
+| `protocol` | `ssh` or `rdp` |
+| `host` | Hostname or IP address |
+| `port` | Optional port |
+| `user` | Optional username |
+| `description` | Optional description |
+| `tags` | Optional list of tags |
+| `options` | Protocol-specific options |
 
-The `add` command also supports `--rdp-domain`, `--rdp-fullscreen`, and
-`--rdp-ignore-certificate`. `rdp.domain` is passed to `xfreerdp3` as
-`/d:<domain>`; use the Active Directory domain or the remote computer name for
-a local Windows account. The domain is not auto-discovered because it cannot
-be reliably inferred from an IP address or hostname. The latter option is
-insecure and should only be used for explicitly trusted test environments;
-certificate validation is enabled by default. Passwords and secrets are never
-written to YAML or passed on the command line. If `xfreerdp3` is not installed,
-`connect` returns a required-client error without starting a process. `--dry-run` plans and prints
-the invocation without looking up the executable, so it does not require
-`xfreerdp3` to be installed.
+### RDP options
 
-`list` and `show` emit JSON version 2. The `list` response contains `version`
-and `connections`; there is no warnings field because the static configuration
-is the only source and its errors are fatal. JSON exposes source provenance and
-only the validated, non-secret RDP options (`client`, `domain`, `fullscreen`,
-and `ignore_certificate`); a client ID is not filtered merely because it is not
-registered on the current platform.
+RDP options are stored under `options.rdp`:
 
-## Commands
+| Option | Description |
+| --- | --- |
+| `client` | RDP client identifier |
+| `domain` | Authentication domain |
+| `fullscreen` | Start in fullscreen mode |
+| `ignore_certificate` | Disable certificate validation |
+
+On Linux, omitting `client` uses the built-in `xfreerdp3` integration.
+
+## SSH and RDP integration
+
+### SSH
+
+Hoplane launches the local `ssh` client:
+
+```text
+ssh -p 22 -l alice -- nas.local
+```
+
+Your existing OpenSSH configuration, agent, and keys remain available. Hoplane
+does not manage SSH credentials or replace the SSH client.
+
+### RDP
+
+On Linux, Hoplane launches `xfreerdp3`:
+
+```text
+xfreerdp3 /v:desktop.example.com:3389 /u:alice /d:CONTOSO /f
+```
+
+Hoplane does not store passwords or pass them as command-line arguments.
+Authentication remains handled by the local RDP client.
+
+Certificate validation can be disabled explicitly with:
 
 ```bash
-hoplane                         # open the picker
-hoplane pick                    # open the picker
-hoplane add office --protocol rdp --host desktop.example.com --user alice \
-  --rdp-client xfreerdp3 --rdp-domain CONTOSO --rdp-fullscreen \
-  --rdp-ignore-certificate
-hoplane add nas --protocol ssh --host nas.local --user alice
-hoplane list                    # JSON output
-hoplane show office             # JSON output
-hoplane connect office           # start the RDP client on Linux
-hoplane connect office --dry-run # show the RDP command without executing it
-hoplane connect nas              # start the SSH client
-hoplane connect nas --dry-run   # show the SSH command without executing it
+--rdp-ignore-certificate
 ```
 
-In the interactive picker, press `Enter` or `c` to connect. Press `o` to add,
-`i` to edit static connections, `y` to duplicate, and `Delete` to remove one
-after confirmation. The protocol is selected from SSH or RDP. Optional
-form sections can be skipped with `Ctrl+S`. The picker remains open after
-successful mutations.
+Use this option only for trusted test environments.
+
+## Dry run
+
+Preview a connection without launching the client:
+
+```bash
+hoplane connect nas --dry-run
+```
+
+Example output:
+
+```text
+dry-run: connection "nas" would execute ssh -p 22 -l alice -- nas.local
+```
+
+## JSON output
+
+The `add`, `list`, and `show` commands emit indented JSON version `2`.
+
+Example:
+
+```json
+{
+  "version": 2,
+  "connection": {
+    "name": "nas",
+    "protocol": "ssh",
+    "host": "nas.local",
+    "port": 22,
+    "user": "alice",
+    "source": {
+      "name": "static",
+      "id": "/home/alice/.config/hoplane/config.yaml"
+    }
+  }
+}
+```
+
+RDP connections also expose their validated options and certificate security
+status.
 
 ## Development
 
+Run the test suite:
+
 ```bash
 go test ./...
+```
+
+Run tests with the race detector:
+
+```bash
+go test -race ./...
+```
+
+Run static analysis:
+
+```bash
+go vet ./...
+```
+
+Run Hoplane from source:
+
+```bash
 go run ./cmd/hoplane
 ```
+
+Useful `just` recipes:
+
+```bash
+just check
+just test
+just vet
+just vulncheck
+just build
+just run
+```
+
+## Project structure
+
+```text
+cmd/hoplane/       Application entrypoint
+internal/cli/      CLI commands
+internal/config/   YAML configuration
+internal/catalog/  Connection catalog
+internal/tui/      Terminal interface
+internal/connector SSH/RDP integration
+internal/output/   JSON output
+internal/domain/   Core domain model
+```
+
+## License
+
+Hoplane is released under the [MIT License](LICENSE).
