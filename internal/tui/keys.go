@@ -27,6 +27,6 @@ var (
 	enterKey = key.NewBinding(key.WithKeys("enter"))
 	skipKey  = key.NewBinding(
 		key.WithKeys("ctrl+s"),
-		key.WithHelp("ctrl+s", "skip this section"),
+		key.WithHelp("ctrl+s", "skip"),
 	)
 )

@@ -85,7 +85,7 @@ func TestOptionalFormHelpIncludesSkipAction(t *testing.T) {
 	form.form.NextGroup()
 
 	bindings := form.form.KeyBinds()
-	if len(bindings) == 0 || bindings[0].Help().Key != "ctrl+s" || bindings[0].Help().Desc != "skip this section" {
+	if len(bindings) == 0 || bindings[0].Help().Key != "ctrl+s" || bindings[0].Help().Desc != "skip" {
 		t.Fatalf("optional form help = %#v, want Ctrl+S skip action first", bindings)
 	}
 }
