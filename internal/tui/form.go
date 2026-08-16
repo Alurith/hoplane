@@ -24,6 +24,7 @@ type formValues struct {
 	Tags        string
 
 	RDPClient            string
+	RDPDomain            string
 	RDPFullscreen        bool
 	RDPIgnoreCertificate bool
 }
@@ -59,6 +60,7 @@ func newEditForm(connection domain.Connection) connectionForm {
 	}
 	if options := connection.Options[rdpoptions.Namespace]; options != nil {
 		values.RDPClient = options[rdpoptions.Client]
+		values.RDPDomain = options[rdpoptions.Domain]
 		values.RDPFullscreen, _ = strconv.ParseBool(options[rdpoptions.Fullscreen])
 		values.RDPIgnoreCertificate, _ = strconv.ParseBool(options[rdpoptions.IgnoreCertificate])
 	}
@@ -107,6 +109,11 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 			Title("Client ID").
 			Description("Leave empty for the platform default (Linux: xfreerdp3).").
 			Value(&shared.RDPClient),
+		huh.NewInput().
+			Key("rdp_domain").
+			Title("Domain").
+			Description("Optional: AD domain or remote computer name for a local account.").
+			Value(&shared.RDPDomain),
 		huh.NewConfirm().Key("rdp_fullscreen").Title("Fullscreen").Value(&shared.RDPFullscreen),
 		huh.NewConfirm().Key("rdp_ignore_certificate").Title("Ignore certificate (INSECURE)").Value(&shared.RDPIgnoreCertificate),
 	).Title("RDP options").Description("Optional fields · Ctrl+S skips this section").WithHideFunc(func() bool {
@@ -205,7 +212,7 @@ func (f connectionForm) SkipOptional() (connectionForm, tea.Cmd, bool) {
 
 func optionalField(field string) bool {
 	switch field {
-	case "user", "description", "tags", "rdp_client", "rdp_fullscreen", "rdp_ignore_certificate":
+	case "user", "description", "tags", "rdp_client", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
 		return true
 	default:
 		return false
@@ -295,6 +302,7 @@ func (f connectionForm) options() domain.Options {
 	case string(domain.ProtocolRDP):
 		encoded := rdpoptions.Encode(rdpoptions.Options{
 			Client:            strings.TrimSpace(f.values.RDPClient),
+			Domain:            strings.TrimSpace(f.values.RDPDomain),
 			Fullscreen:        f.values.RDPFullscreen,
 			IgnoreCertificate: f.values.RDPIgnoreCertificate,
 		})
@@ -363,6 +371,7 @@ func sanitizeFormValues(values formValues) formValues {
 	values.Description = terminal.EscapeControls(values.Description)
 	values.Tags = terminal.EscapeControls(values.Tags)
 	values.RDPClient = terminal.EscapeControls(values.RDPClient)
+	values.RDPDomain = terminal.EscapeControls(values.RDPDomain)
 	return values
 }
 

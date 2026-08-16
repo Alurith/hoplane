@@ -16,6 +16,7 @@ const Namespace = "rdp"
 
 const (
 	Client            = "client"
+	Domain            = "domain"
 	Fullscreen        = "fullscreen"
 	IgnoreCertificate = "ignore_certificate"
 )
@@ -24,6 +25,7 @@ const (
 // logical adapter ID, never an executable name or path supplied by the user.
 type Options struct {
 	Client            string
+	Domain            string
 	Fullscreen        bool
 	IgnoreCertificate bool
 }
@@ -60,6 +62,8 @@ func Decode(all domain.Options) (Options, error) {
 				return Options{}, err
 			}
 			options.Client = value
+		case Domain:
+			options.Domain = value
 		case Fullscreen:
 			parsed, err := strconv.ParseBool(value)
 			if err != nil {
@@ -83,9 +87,12 @@ func Decode(all domain.Options) (Options, error) {
 // representation. False boolean values are omitted because absence has the
 // same meaning as false.
 func Encode(options Options) domain.Options {
-	values := make(map[string]string, 3)
+	values := make(map[string]string, 4)
 	if options.Client != "" {
 		values[Client] = options.Client
+	}
+	if options.Domain != "" {
+		values[Domain] = options.Domain
 	}
 	if options.Fullscreen {
 		values[Fullscreen] = strconv.FormatBool(options.Fullscreen)

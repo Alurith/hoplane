@@ -28,10 +28,13 @@ func TestRDPOutputPreservesLogicalClientIDsWithoutHardcodedFiltering(t *testing.
 		t.Run(client, func(t *testing.T) {
 			result := FromDomain(domain.Connection{
 				Endpoint: domain.Endpoint{Protocol: domain.ProtocolRDP},
-				Options:  domain.Options{"rdp": {"client": client}},
+				Options:  domain.Options{"rdp": {"client": client, "domain": "CONTOSO"}},
 			})
 			if got := result.Options["rdp"]["client"]; got != client {
 				t.Fatalf("client = %q, want %q", got, client)
+			}
+			if got := result.Options["rdp"]["domain"]; got != "CONTOSO" {
+				t.Fatalf("domain = %q, want CONTOSO", got)
 			}
 		})
 	}

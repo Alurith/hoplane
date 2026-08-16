@@ -20,6 +20,7 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	var description string
 	var tags []string
 	var rdpClient string
+	var rdpDomain string
 	var rdpFullscreen bool
 	var rdpIgnoreCertificate bool
 
@@ -50,6 +51,7 @@ func (s *commandState) newAddCommand() *cobra.Command {
 				return err
 			}
 			rdpFlagsChanged := cmd.Flags().Changed("rdp-client") ||
+				cmd.Flags().Changed("rdp-domain") ||
 				cmd.Flags().Changed("rdp-fullscreen") ||
 				cmd.Flags().Changed("rdp-ignore-certificate")
 
@@ -63,8 +65,12 @@ func (s *commandState) newAddCommand() *cobra.Command {
 					if cmd.Flags().Changed("rdp-client") && strings.TrimSpace(rdpClient) == "" {
 						return fmt.Errorf("RDP option %q cannot be empty", rdpoptions.Client)
 					}
+					if cmd.Flags().Changed("rdp-domain") && strings.TrimSpace(rdpDomain) == "" {
+						return fmt.Errorf("RDP option %q cannot be empty", rdpoptions.Domain)
+					}
 					entry.Options = rdpoptions.Encode(rdpoptions.Options{
 						Client:            rdpClient,
+						Domain:            rdpDomain,
 						Fullscreen:        rdpFullscreen,
 						IgnoreCertificate: rdpIgnoreCertificate,
 					})
@@ -97,6 +103,7 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	flags.StringVar(&description, "description", "", "optional connection description")
 	flags.StringSliceVar(&tags, "tag", nil, "connection tag; may be repeated")
 	flags.StringVar(&rdpClient, "rdp-client", "", "logical RDP client ID (Linux default: xfreerdp3)")
+	flags.StringVar(&rdpDomain, "rdp-domain", "", "RDP authentication domain (for example: CONTOSO or the remote computer name)")
 	flags.BoolVar(&rdpFullscreen, "rdp-fullscreen", false, "start RDP in fullscreen")
 	flags.BoolVar(&rdpIgnoreCertificate, "rdp-ignore-certificate", false, "INSECURE: ignore the RDP server certificate")
 	return command

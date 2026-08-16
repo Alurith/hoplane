@@ -46,6 +46,7 @@ connections:
     options:
       rdp:
         client: xfreerdp3
+        domain: CONTOSO
         fullscreen: "true"
         ignore_certificate: "true"
 
@@ -66,20 +67,23 @@ from YAML. Windows and macOS retain the RDP model but do not register a client
 yet, so attempting to plan an RDP connection there reports that no platform
 client is registered.
 
-The `add` command also supports `--rdp-fullscreen` and
-`--rdp-ignore-certificate`. The latter is insecure and should only be used for
-explicitly trusted test environments; certificate validation is enabled by
-default. Passwords and secrets are never written to YAML or passed on the
-command line. If `xfreerdp3` is not installed, `connect` returns a
-required-client error without starting a process. `--dry-run` plans and prints
+The `add` command also supports `--rdp-domain`, `--rdp-fullscreen`, and
+`--rdp-ignore-certificate`. `rdp.domain` is passed to `xfreerdp3` as
+`/d:<domain>`; use the Active Directory domain or the remote computer name for
+a local Windows account. The domain is not auto-discovered because it cannot
+be reliably inferred from an IP address or hostname. The latter option is
+insecure and should only be used for explicitly trusted test environments;
+certificate validation is enabled by default. Passwords and secrets are never
+written to YAML or passed on the command line. If `xfreerdp3` is not installed,
+`connect` returns a required-client error without starting a process. `--dry-run` plans and prints
 the invocation without looking up the executable, so it does not require
 `xfreerdp3` to be installed.
 
 `list` and `show` emit JSON version 2. The `list` response contains `version`
 and `connections`; there is no warnings field because the static configuration
 is the only source and its errors are fatal. JSON exposes source provenance and
-only the validated, non-secret RDP options (`client`, `fullscreen`, and
-`ignore_certificate`); a client ID is not filtered merely because it is not
+only the validated, non-secret RDP options (`client`, `domain`, `fullscreen`,
+and `ignore_certificate`); a client ID is not filtered merely because it is not
 registered on the current platform.
 
 ## Commands
@@ -88,7 +92,8 @@ registered on the current platform.
 hoplane                         # open the picker
 hoplane pick                    # open the picker
 hoplane add office --protocol rdp --host desktop.example.com --user alice \
-  --rdp-client xfreerdp3 --rdp-fullscreen --rdp-ignore-certificate
+  --rdp-client xfreerdp3 --rdp-domain CONTOSO --rdp-fullscreen \
+  --rdp-ignore-certificate
 hoplane add nas --protocol ssh --host nas.local --user alice
 hoplane list                    # JSON output
 hoplane show office             # JSON output

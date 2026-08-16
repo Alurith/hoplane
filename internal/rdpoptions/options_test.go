@@ -12,6 +12,7 @@ func TestDecodeRDPNamespace(t *testing.T) {
 	got, err := Decode(domain.Options{
 		Namespace: {
 			Client:            "xfreerdp3",
+			Domain:            "CONTOSO",
 			Fullscreen:        "true",
 			IgnoreCertificate: "false",
 		},
@@ -19,20 +20,27 @@ func TestDecodeRDPNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	want := Options{Client: "xfreerdp3", Fullscreen: true}
+	want := Options{Client: "xfreerdp3", Domain: "CONTOSO", Fullscreen: true}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Decode() = %#v, want %#v", got, want)
 	}
 }
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
-	want := Options{Client: "xfreerdp3", Fullscreen: true, IgnoreCertificate: true}
+	want := Options{Client: "xfreerdp3", Domain: "CONTOSO", Fullscreen: true, IgnoreCertificate: true}
 	got, err := Decode(Encode(want))
 	if err != nil {
 		t.Fatalf("Decode(Encode()) error = %v", err)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+}
+
+func TestDecodeRejectsEmptyDomain(t *testing.T) {
+	_, err := Decode(domain.Options{Namespace: {Domain: "  "}})
+	if err == nil || !strings.Contains(err.Error(), `RDP option "domain" cannot be empty`) {
+		t.Fatalf("Decode() error = %v, want empty domain error", err)
 	}
 }
 

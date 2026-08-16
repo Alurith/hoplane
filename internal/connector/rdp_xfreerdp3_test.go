@@ -44,6 +44,15 @@ func TestLinuxRDPConnectorPlansXFREERDP3Invocations(t *testing.T) {
 			}},
 			wantArgs: []string{"/v:[2001:db8::10]:3389", "/u:alice", "/f", "/cert:ignore"},
 		},
+		{
+			name: "local account domain",
+			host: "192.0.2.10",
+			user: "aluri",
+			options: domain.Options{"rdp": {
+				"domain": "LAPTOP-25TLFPF0",
+			}},
+			wantArgs: []string{"/v:192.0.2.10:3389", "/u:aluri", "/d:LAPTOP-25TLFPF0"},
+		},
 	}
 
 	for _, test := range tests {

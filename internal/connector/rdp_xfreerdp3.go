@@ -41,6 +41,9 @@ func (xfreerdp3Client) Plan(
 	if connection.Endpoint.User != "" {
 		args = append(args, "/u:"+connection.Endpoint.User)
 	}
+	if options.Domain != "" {
+		args = append(args, "/d:"+options.Domain)
+	}
 	if options.Fullscreen {
 		args = append(args, "/f")
 	}

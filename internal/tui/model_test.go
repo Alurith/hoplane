@@ -86,6 +86,7 @@ func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {
 		Protocol:             "rdp",
 		Host:                 "desktop.example.com",
 		RDPClient:            "xfreerdp3",
+		RDPDomain:            "CONTOSO",
 		RDPFullscreen:        true,
 		RDPIgnoreCertificate: true,
 	}
@@ -96,11 +97,32 @@ func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {
 	}
 	want := domain.Options{"rdp": {
 		"client":             "xfreerdp3",
+		"domain":             "CONTOSO",
 		"fullscreen":         "true",
 		"ignore_certificate": "true",
 	}}
 	if !reflect.DeepEqual(candidate.Options, want) {
 		t.Fatalf("options = %#v, want %#v", candidate.Options, want)
+	}
+}
+
+func TestRDPFormLoadsDomainWhenEditing(t *testing.T) {
+	connection := domain.Connection{
+		Name: "office",
+		Endpoint: domain.Endpoint{
+			Protocol: domain.ProtocolRDP,
+			Host:     "desktop.example.com",
+			Port:     3389,
+		},
+		Options: domain.Options{"rdp": {"domain": "CONTOSO"}},
+	}
+	form := newEditForm(connection)
+	candidate, err := form.Candidate()
+	if err != nil {
+		t.Fatalf("Candidate() error = %v", err)
+	}
+	if got := candidate.Options["rdp"]["domain"]; got != "CONTOSO" {
+		t.Fatalf("domain = %q, want CONTOSO", got)
 	}
 }
 

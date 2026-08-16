@@ -56,6 +56,7 @@ func TestConnectRDPDryRun(t *testing.T) {
 		User:     "alice",
 		Options: domain.Options{"rdp": {
 			"client":             "xfreerdp3",
+			"domain":             "CONTOSO",
 			"fullscreen":         "true",
 			"ignore_certificate": "true",
 		}},
@@ -75,7 +76,7 @@ func TestConnectRDPDryRun(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	const want = "dry-run: connection \"office\" would execute xfreerdp3 /v:desktop.example.com:3389 /u:alice /f /cert:ignore\n"
+	const want = "dry-run: connection \"office\" would execute xfreerdp3 /v:desktop.example.com:3389 /u:alice /d:CONTOSO /f /cert:ignore\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
