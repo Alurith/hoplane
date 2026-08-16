@@ -79,6 +79,19 @@ func TestEditFormPreservesCommaInTags(t *testing.T) {
 	}
 }
 
+func TestOptionalFormHelpIncludesSkipAction(t *testing.T) {
+	form := newAddForm()
+	form.form.Init()
+	form.form.NextGroup()
+
+	for _, binding := range form.form.KeyBinds() {
+		if binding.Help().Key == "ctrl+s" && binding.Help().Desc == "skip this section" {
+			return
+		}
+	}
+	t.Fatal("optional form help does not include Ctrl+S skip action")
+}
+
 func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {
 	form := newAddForm()
 	form.values = formValues{

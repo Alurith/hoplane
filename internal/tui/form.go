@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -100,32 +101,36 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		Description("Comma-separated tags").
 		Value(&shared.Tags)
 
-	additionalGroup := huh.NewGroup(user, description, tags).
+	additionalGroup := huh.NewGroup(
+		withSkipHelp(user),
+		withSkipHelp(description),
+		withSkipHelp(tags),
+	).
 		Title("Additional data").
-		Description("Optional fields · Ctrl+S skips this section")
+		Description("Optional fields")
 
 	rdpGroup := huh.NewGroup(
-		huh.NewInput().
+		withSkipHelp(huh.NewInput().
 			Key("rdp_client").
 			Title("Client ID").
 			Description("Leave empty for the platform default (Linux: xfreerdp3).").
-			Value(&shared.RDPClient),
-		huh.NewInput().
+			Value(&shared.RDPClient)),
+		withSkipHelp(huh.NewInput().
 			Key("rdp_domain").
 			Title("Domain").
 			Description("Optional: AD domain or remote computer name for a local account.").
-			Value(&shared.RDPDomain),
-		huh.NewConfirm().
+			Value(&shared.RDPDomain)),
+		withSkipHelp(huh.NewConfirm().
 			Key("rdp_fullscreen").
 			Title("Fullscreen").
 			WithButtonAlignment(lipgloss.Left).
-			Value(&shared.RDPFullscreen),
-		huh.NewConfirm().
+			Value(&shared.RDPFullscreen)),
+		withSkipHelp(huh.NewConfirm().
 			Key("rdp_ignore_certificate").
 			Title("Ignore certificate (INSECURE)").
 			WithButtonAlignment(lipgloss.Left).
-			Value(&shared.RDPIgnoreCertificate),
-	).Title("RDP options").Description("Optional fields · Ctrl+S skips this section").WithHideFunc(func() bool {
+			Value(&shared.RDPIgnoreCertificate)),
+	).Title("RDP options").Description("Optional fields").WithHideFunc(func() bool {
 		return !strings.EqualFold(strings.TrimSpace(shared.Protocol), string(domain.ProtocolRDP))
 	})
 
@@ -217,6 +222,19 @@ func (f connectionForm) SkipOptional() (connectionForm, tea.Cmd, bool) {
 	command := f.form.NextGroup()
 	f.syncValues()
 	return f, command, true
+}
+
+type skipHelpField struct {
+	huh.Field
+}
+
+func (f skipHelpField) KeyBinds() []key.Binding {
+	bindings := append([]key.Binding(nil), f.Field.KeyBinds()...)
+	return append(bindings, skipKey)
+}
+
+func withSkipHelp(field huh.Field) huh.Field {
+	return skipHelpField{Field: field}
 }
 
 func optionalField(field string) bool {
