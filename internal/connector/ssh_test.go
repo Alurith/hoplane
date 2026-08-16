@@ -8,9 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"os"
-	"path/filepath"
-
 	"github.com/Alurith/hoplane/internal/domain"
 )
 
@@ -73,6 +70,19 @@ func TestSSHConnectorPassesOptionLikeUserAsLoginValue(t *testing.T) {
 	}
 }
 
+func TestSSHConnectorPlansIPv4WithoutUser(t *testing.T) {
+	got, err := NewSSHConnector(&fakeRunner{}).Plan(domain.Connection{
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "192.0.2.10", Port: 22},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	want := Invocation{Program: "ssh", Args: []string{"-p", "22", "--", "192.0.2.10"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Plan() = %#v, want %#v", got, want)
+	}
+}
+
 func TestSSHConnectorPlansDirectIPv6WithoutBrackets(t *testing.T) {
 	connector := NewSSHConnector(&fakeRunner{})
 	connection := domain.Connection{
@@ -94,92 +104,14 @@ func TestSSHConnectorPlansDirectIPv6WithoutBrackets(t *testing.T) {
 	}
 }
 
-func TestSSHConnectorPlansSSHOptions(t *testing.T) {
-	connector := NewSSHConnector(&fakeRunner{})
-	connection := domain.Connection{
-		Endpoint: domain.Endpoint{
-			Protocol: domain.ProtocolSSH,
-			Host:     "nas.local",
-			Port:     2222,
-			User:     "alice",
-		},
-		Options: domain.Options{
-			"ssh": {
-				"identity_file": "/home/alice/.ssh/id_ed25519",
-				"proxy_jump":    "bastion",
-			},
-		},
-	}
-
-	got, err := connector.Plan(connection)
-	if err != nil {
-		t.Fatalf("Plan() error = %v", err)
-	}
-	want := Invocation{
-		Program: "ssh",
-		Args:    []string{"-i", "/home/alice/.ssh/id_ed25519", "-J", "bastion", "-p", "2222", "-l", "alice", "--", "nas.local"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Plan() = %#v, want %#v", got, want)
-	}
-}
-
-func TestSSHConnectorPlansConfigAliasWithoutOverrides(t *testing.T) {
-	connector := NewSSHConnector(&fakeRunner{})
-	configPath := filepath.Join(t.TempDir(), "ssh", "config")
-	connection := domain.Connection{
-		Endpoint: domain.Endpoint{
-			Protocol: domain.ProtocolSSH,
-			Host:     "nas",
-			Port:     22,
-		},
-		Metadata: domain.Metadata{
-			"ssh": {
-				"config_file": configPath,
-				"host_alias":  "nas",
-			},
-		},
-	}
-
-	got, err := connector.Plan(connection)
-	if err != nil {
-		t.Fatalf("Plan() error = %v", err)
-	}
-	want := Invocation{Program: "ssh", Args: []string{"-F", configPath, "--", "nas"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Plan() = %#v, want %#v", got, want)
-	}
-}
-
-func TestSSHConnectorExpandsIdentityFileHome(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("cannot resolve home directory: %v", err)
-	}
-	connector := NewSSHConnector(&fakeRunner{})
-	connection := domain.Connection{
-		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "nas.local", Port: 22},
-		Options:  domain.Options{"ssh": {"identity_file": "~/.ssh/id_ed25519"}},
-	}
-
-	got, err := connector.Plan(connection)
-	if err != nil {
-		t.Fatalf("Plan() error = %v", err)
-	}
-	want := filepath.Join(home, ".ssh", "id_ed25519")
-	if !reflect.DeepEqual(got.Args, []string{"-i", want, "-p", "22", "--", "nas.local"}) {
-		t.Fatalf("args = %#v, want %#v", got.Args, []string{"-i", want, "-p", "22", "--", "nas.local"})
-	}
-}
-
-func TestSSHConnectorRejectsUnknownOption(t *testing.T) {
+func TestSSHConnectorRejectsOptions(t *testing.T) {
 	connector := NewSSHConnector(&fakeRunner{})
 	_, err := connector.Plan(domain.Connection{
 		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "nas.local", Port: 22},
-		Options:  domain.Options{"ssh": {"unknown": "value"}},
+		Options:  domain.Options{"ssh": {"identity_file": "/tmp/id"}},
 	})
-	if err == nil || !strings.Contains(err.Error(), `unsupported SSH option "unknown"`) {
-		t.Fatalf("Plan() error = %v, want unknown option error", err)
+	if err == nil || !strings.Contains(err.Error(), "SSH options are not supported") {
+		t.Fatalf("Plan() error = %v, want SSH options rejection", err)
 	}
 }
 

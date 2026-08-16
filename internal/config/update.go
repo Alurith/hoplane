@@ -12,9 +12,6 @@ import (
 // Update serializes a read-modify-write transaction for one configuration
 // path. The lock is held through validation and the atomic replacement.
 func Update(ctx context.Context, path string, mutate func(*File) error) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if mutate == nil {
 		return fmt.Errorf("config mutation cannot be nil")
 	}

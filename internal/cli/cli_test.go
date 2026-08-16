@@ -13,13 +13,11 @@ import (
 	"github.com/Alurith/hoplane/internal/output"
 )
 
-func TestAddPersistsSSHOptions(t *testing.T) {
+func TestAddPersistsStandardSSH(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	if err := Execute(context.Background(), []string{
-		"add", "nas", "--config", path, "--ssh-config", sshPath,
-		"--protocol", "ssh", "--host", "nas.local",
-		"--identity-file", "~/.ssh/id_ed25519", "--proxy-jump", "bastion",
+		"add", "nas", "--config", path,
+		"--protocol", "ssh", "--host", "nas.local", "--user", "alice",
 	}, Dependencies{
 		Input:  bytes.NewBuffer(nil),
 		Output: &bytes.Buffer{},
@@ -32,20 +30,18 @@ func TestAddPersistsSSHOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	options := file.Connections[0].Options["ssh"]
-	if options["identity_file"] != "~/.ssh/id_ed25519" || options["proxy_jump"] != "bastion" {
-		t.Fatalf("options = %#v", file.Connections[0].Options)
+	if options := file.Connections[0].Options; len(options) != 0 {
+		t.Fatalf("SSH options = %#v, want none", options)
 	}
 }
 
 func TestAddPersistsRDPOptions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 
 	err := Execute(context.Background(), []string{
-		"add", "office", "--config", path, "--ssh-config", sshPath,
+		"add", "office", "--config", path,
 		"--protocol", "rdp", "--host", "desktop.example.com", "--user", "alice",
-		"--rdp-client", "xfreerdp", "--rdp-fullscreen", "--rdp-ignore-certificate",
+		"--rdp-client", "xfreerdp3", "--rdp-fullscreen", "--rdp-ignore-certificate",
 	}, Dependencies{
 		Input:  bytes.NewBuffer(nil),
 		Output: &bytes.Buffer{},
@@ -61,7 +57,7 @@ func TestAddPersistsRDPOptions(t *testing.T) {
 	}
 	options := file.Connections[0].Options["rdp"]
 	want := map[string]string{
-		"client":             "xfreerdp",
+		"client":             "xfreerdp3",
 		"fullscreen":         "true",
 		"ignore_certificate": "true",
 	}
@@ -70,29 +66,41 @@ func TestAddPersistsRDPOptions(t *testing.T) {
 	}
 }
 
-func TestAddRejectsEmptySSHOption(t *testing.T) {
+func TestAddRejectsExecutableLikeRDPClient(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
-
 	err := Execute(context.Background(), []string{
-		"add", "nas", "--config", path, "--ssh-config", sshPath,
-		"--protocol", "ssh", "--host", "nas.local", "--identity-file", "   ",
+		"add", "office", "--config", path,
+		"--protocol", "rdp", "--host", "desktop.example.com", "--rdp-client", "/usr/bin/xfreerdp3",
 	}, Dependencies{
 		Input:  bytes.NewBuffer(nil),
 		Output: &bytes.Buffer{},
 		Errors: &bytes.Buffer{},
 	})
-	if err == nil || !strings.Contains(err.Error(), `SSH option "identity_file" cannot be empty`) {
-		t.Fatalf("add error = %v, want empty option error", err)
+	if err == nil || !strings.Contains(err.Error(), "must be a logical client ID") {
+		t.Fatalf("add error = %v, want logical client ID rejection", err)
+	}
+}
+
+func TestAddRejectsObsoleteSSHFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	err := Execute(context.Background(), []string{
+		"add", "nas", "--config", path,
+		"--protocol", "ssh", "--host", "nas.local", "--identity-file", "/tmp/id",
+	}, Dependencies{
+		Input:  bytes.NewBuffer(nil),
+		Output: &bytes.Buffer{},
+		Errors: &bytes.Buffer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("add error = %v, want obsolete flag rejection", err)
 	}
 }
 
 func TestAddRejectsRDPOptionsForSSH(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 
 	err := Execute(context.Background(), []string{
-		"add", "nas", "--config", path, "--ssh-config", sshPath,
+		"add", "nas", "--config", path,
 		"--protocol", "ssh", "--host", "nas.local", "--rdp-fullscreen",
 	}, Dependencies{
 		Input:  bytes.NewBuffer(nil),
@@ -106,18 +114,17 @@ func TestAddRejectsRDPOptionsForSSH(t *testing.T) {
 
 func TestAddListAndShow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	var outputBuffer bytes.Buffer
 	dependencies := Dependencies{Input: bytes.NewBuffer(nil), Output: &outputBuffer, Errors: &bytes.Buffer{}}
 
 	if err := Execute(context.Background(), []string{
-		"add", "office", "--config", path, "--ssh-config", sshPath, "--protocol", "rdp", "--host", "desktop.example.com", "--user", "alice",
+		"add", "office", "--config", path, "--protocol", "rdp", "--host", "desktop.example.com", "--user", "alice",
 	}, dependencies); err != nil {
 		t.Fatalf("add error = %v", err)
 	}
 	outputBuffer.Reset()
 
-	if err := Execute(context.Background(), []string{"list", "--config", path, "--ssh-config", sshPath}, dependencies); err != nil {
+	if err := Execute(context.Background(), []string{"list", "--config", path}, dependencies); err != nil {
 		t.Fatalf("list error = %v", err)
 	}
 	var listed output.ListResponse
@@ -129,7 +136,7 @@ func TestAddListAndShow(t *testing.T) {
 	}
 
 	outputBuffer.Reset()
-	if err := Execute(context.Background(), []string{"show", "office", "--config", path, "--ssh-config", sshPath}, dependencies); err != nil {
+	if err := Execute(context.Background(), []string{"show", "office", "--config", path}, dependencies); err != nil {
 		t.Fatalf("show error = %v", err)
 	}
 	var shown output.ConnectionResponse

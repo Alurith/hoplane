@@ -5,7 +5,7 @@ A protocol-neutral connection directory for fast terminal-based selection.
 The project is inspired by [Charmbracelet Wishlist](https://github.com/charmbracelet/wishlist), but a connection is not implicitly SSH. The target architecture is:
 
 ```text
-discovery → normalized endpoints → picker → connector
+static configuration → normalized endpoints → picker → connector
 ```
 
 ## Current status
@@ -15,11 +15,10 @@ The first four vertical slices provide:
 - YAML configuration and a Bubble Tea picker
 - `add`, `list`, `show`, and `connect` commands
 - JSON output for automation
-- protocol-neutral entries with SSH, RDP, VNC, and custom protocol names
+- SSH and RDP connection entries
 - SSH execution through the local OpenSSH client
-- Linux RDP execution through `xfreerdp`
-- SSH identity files, proxy jumps, and local agent/key support
-- discovery of concrete aliases from `~/.ssh/config`
+- Linux RDP execution through `xfreerdp3`
+- standard OpenSSH agent, key, and local configuration support
 
 ## Configuration
 
@@ -29,12 +28,12 @@ By default, hoplane reads:
 <user config directory>/hoplane/config.yaml
 ```
 
-The path can be overridden with `--config`. The SSH config path can be overridden independently with `--ssh-config`.
+The path can be overridden with `--config`.
 
 Example:
 
 ```yaml
-version: 1
+version: 2
 
 connections:
   - name: office
@@ -46,7 +45,7 @@ connections:
       - work
     options:
       rdp:
-        client: xfreerdp
+        client: xfreerdp3
         fullscreen: "true"
         ignore_certificate: "true"
 
@@ -54,24 +53,34 @@ connections:
     protocol: ssh
     host: nas.local
     port: 22
-    options:
-      ssh:
-        identity_file: ~/.ssh/id_ed25519
-        proxy_jump: bastion
+    user: alice
 ```
 
-SSH aliases from `~/.ssh/config` are available automatically. Use `--ssh-config` to select another OpenSSH config file. OpenSSH configuration is trusted executable input: directives such as `ProxyCommand`, `Match exec`, `Include`, and forwarding remain authoritative and may run local commands or change network behavior. Do not use a configuration or catalog supplied by an untrusted party.
+Hoplane passes standard SSH endpoints to the local `ssh` client. OpenSSH may still use the user's normal agent, keys, and local configuration; Hoplane does not expose separate identity or proxy settings. Known default ports are SSH `22` and RDP `3389`.
 
-Known default ports are SSH `22`, RDP `3389`, and VNC `5900`. Other protocols require an explicit port.
+RDP connections currently run only on Linux, through `xfreerdp3`. The
+`rdp.client` value and `--rdp-client` flag select a logical client ID; when it
+is omitted, Linux defaults to `xfreerdp3`. There is no automatic fallback and
+client paths, programs, extra arguments, and shell commands are not accepted
+from YAML. Windows and macOS retain the RDP model but do not register a client
+yet, so attempting to plan an RDP connection there reports that no platform
+client is registered.
 
-RDP connections run on Linux through `xfreerdp`. The `add` command supports
-`--rdp-client`, `--rdp-fullscreen`, and `--rdp-ignore-certificate`; these flags
-are persisted in the `rdp` options namespace. `--rdp-ignore-certificate` is
-insecure and should only be used for explicitly trusted test environments;
-certificate validation is enabled by default. Passwords and secrets are never
-written to YAML or passed on the command line. If `xfreerdp` is not installed,
-`connect` reports a required-client error without starting a process. `--dry-run`
-only prints the planned invocation, so it does not require `xfreerdp` to be installed.
+The `add` command also supports `--rdp-fullscreen` and
+`--rdp-ignore-certificate`. The latter is insecure and should only be used for
+explicitly trusted test environments; certificate validation is enabled by
+default. Passwords and secrets are never written to YAML or passed on the
+command line. If `xfreerdp3` is not installed, `connect` returns a
+required-client error without starting a process. `--dry-run` plans and prints
+the invocation without looking up the executable, so it does not require
+`xfreerdp3` to be installed.
+
+`list` and `show` emit JSON version 2. The `list` response contains `version`
+and `connections`; there is no warnings field because the static configuration
+is the only source and its errors are fatal. JSON exposes source provenance and
+only the validated, non-secret RDP options (`client`, `fullscreen`, and
+`ignore_certificate`); a client ID is not filtered merely because it is not
+registered on the current platform.
 
 ## Commands
 
@@ -79,12 +88,12 @@ only prints the planned invocation, so it does not require `xfreerdp` to be inst
 hoplane                         # open the picker
 hoplane pick                    # open the picker
 hoplane add office --protocol rdp --host desktop.example.com --user alice \
-  --rdp-client xfreerdp --rdp-fullscreen --rdp-ignore-certificate
-hoplane add nas --protocol ssh --host nas.local --identity-file ~/.ssh/id_ed25519 --proxy-jump bastion
+  --rdp-client xfreerdp3 --rdp-fullscreen --rdp-ignore-certificate
+hoplane add nas --protocol ssh --host nas.local --user alice
 hoplane list                    # JSON output
 hoplane show office             # JSON output
-hoplane connect office           # start xfreerdp on Linux
-hoplane connect office --dry-run # show the xfreerdp command without executing it
+hoplane connect office           # start the RDP client on Linux
+hoplane connect office --dry-run # show the RDP command without executing it
 hoplane connect nas              # start the SSH client
 hoplane connect nas --dry-run   # show the SSH command without executing it
 ```

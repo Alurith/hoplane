@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/domain"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 )
 
 func TestRDPOutputReportsEffectiveCertificatePosture(t *testing.T) {
@@ -25,34 +23,43 @@ func TestRDPOutputReportsEffectiveCertificatePosture(t *testing.T) {
 	}
 }
 
-func TestSSHOutputUsesTypedConfigReference(t *testing.T) {
-	connection := domain.Connection{
-		Endpoint: domain.Endpoint{
-			Protocol: domain.ProtocolSSH,
-			Host:     "nas",
-			Port:     22,
-		},
-		Metadata: domain.Metadata{sshoptions.Namespace: {
-			sshoptions.ConfigFile: "/home/alice/.ssh/config",
-			sshoptions.HostAlias:  "nas",
-		}},
+func TestRDPOutputPreservesLogicalClientIDsWithoutHardcodedFiltering(t *testing.T) {
+	for _, client := range []string{"xfreerdp3", "future-client"} {
+		t.Run(client, func(t *testing.T) {
+			result := FromDomain(domain.Connection{
+				Endpoint: domain.Endpoint{Protocol: domain.ProtocolRDP},
+				Options:  domain.Options{"rdp": {"client": client}},
+			})
+			if got := result.Options["rdp"]["client"]; got != client {
+				t.Fatalf("client = %q, want %q", got, client)
+			}
+		})
 	}
-	result := FromDomain(connection)
-	if result.SSHConfig == nil || result.SSHConfig.File == "" || result.SSHConfig.Alias != "nas" {
-		t.Fatalf("SSHConfig = %#v, want typed reference", result.SSHConfig)
+}
+
+func TestRDPOutputDoesNotExposeInvalidExecutableLikeClient(t *testing.T) {
+	result := FromDomain(domain.Connection{
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolRDP},
+		Options:  domain.Options{"rdp": {"client": "/tmp/rdp-client"}},
+	})
+	if result.Options != nil {
+		t.Fatalf("options = %#v, want invalid options omitted", result.Options)
+	}
+	if result.Security == nil || result.Security.CertificateValidation != "invalid-config" {
+		t.Fatalf("security = %#v, want invalid-config", result.Security)
 	}
 }
 
 func TestWriteList(t *testing.T) {
 	var output bytes.Buffer
-	err := WriteList(&output, catalog.Catalog{Connections: []domain.Connection{{
+	err := WriteList(&output, []domain.Connection{{
 		Name: "nas",
 		Endpoint: domain.Endpoint{
 			Protocol: domain.ProtocolSSH,
 			Host:     "nas.local",
 			Port:     22,
 		},
-	}}})
+	}})
 	if err != nil {
 		t.Fatalf("WriteList() error = %v", err)
 	}
@@ -61,7 +68,15 @@ func TestWriteList(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if decoded.Version != 1 || len(decoded.Connections) != 1 || decoded.Connections[0].Protocol != "ssh" {
+	if decoded.Version != 2 || len(decoded.Connections) != 1 || decoded.Connections[0].Protocol != "ssh" {
 		t.Fatalf("decoded = %#v", decoded)
+	}
+
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(output.Bytes(), &object); err != nil {
+		t.Fatalf("invalid JSON object: %v", err)
+	}
+	if _, exists := object["warnings"]; exists {
+		t.Fatal("list JSON still exposes obsolete warning machinery")
 	}
 }

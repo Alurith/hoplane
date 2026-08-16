@@ -24,14 +24,6 @@ type Policy struct {
 	RequirePrivate        bool
 }
 
-func SSHConfigPolicy(maxBytes int64) Policy {
-	return Policy{
-		MaxBytes:              maxBytes,
-		RequireOwner:          true,
-		RejectGroupOtherWrite: true,
-	}
-}
-
 // Validate checks a path without opening it. Symlinks, special files and
 // files that do not satisfy the policy are rejected.
 func Validate(path string, policy Policy) error {

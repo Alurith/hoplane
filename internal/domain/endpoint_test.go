@@ -53,19 +53,19 @@ func TestNormalizeCandidateUsesDefaultPort(t *testing.T) {
 }
 
 func TestNormalizeCandidateClonesOptions(t *testing.T) {
-	options := Options{"ssh": {"identity_file": "~/.ssh/id_ed25519"}}
+	options := Options{"rdp": {"client": "xfreerdp3"}}
 	connection, err := NormalizeCandidate(Candidate{
-		Name:     "nas",
-		Protocol: "ssh",
-		Host:     "nas.local",
+		Name:     "office",
+		Protocol: "rdp",
+		Host:     "desktop.example.com",
 		Options:  options,
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCandidate() error = %v", err)
 	}
 
-	options["ssh"]["identity_file"] = "changed"
-	if got := connection.Options["ssh"]["identity_file"]; got != "~/.ssh/id_ed25519" {
+	options["rdp"]["client"] = "changed"
+	if got := connection.Options["rdp"]["client"]; got != "xfreerdp3" {
 		t.Fatalf("connection options were not cloned: %q", got)
 	}
 }
@@ -99,13 +99,15 @@ func TestNormalizeCandidateRejectsInvalidBracketedOrTargetHosts(t *testing.T) {
 	}
 }
 
-func TestNormalizeCandidateRequiresPortForUnknownProtocol(t *testing.T) {
+func TestNormalizeCandidateRejectsUnsupportedProtocol(t *testing.T) {
+	port := uint16(5900)
 	_, err := NormalizeCandidate(Candidate{
 		Name:     "custom",
-		Protocol: "custom-protocol",
+		Protocol: "vnc",
 		Host:     "host.local",
+		Port:     &port,
 	})
 	if err == nil {
-		t.Fatal("NormalizeCandidate() error = nil, want missing port error")
+		t.Fatal("NormalizeCandidate() error = nil, want unsupported protocol error")
 	}
 }

@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
-	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
 )
 
@@ -28,14 +26,10 @@ func (e *pickerEditor) Create(ctx context.Context, candidate domain.Candidate) (
 	if err != nil {
 		return nil, err
 	}
-	connection, err := normalizePickerCandidate(candidate, path)
+	connection, err := normalizeCandidate(candidate, path)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.checkSSHNameAvailable(ctx, connection.Name); err != nil {
-		return nil, err
-	}
-
 	if err := config.Update(ctx, path, func(file *config.File) error {
 		if err := checkStaticNameAvailable(*file, connection.Name, -1); err != nil {
 			return err
@@ -60,16 +54,10 @@ func (e *pickerEditor) Update(
 	if err != nil {
 		return nil, err
 	}
-	connection, err := normalizePickerCandidate(candidate, path)
+	connection, err := normalizeCandidate(candidate, path)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(connection.Name) != strings.TrimSpace(original.Name) {
-		if err := e.checkSSHNameAvailable(ctx, connection.Name); err != nil {
-			return nil, err
-		}
-	}
-
 	if err := config.Update(ctx, path, func(file *config.File) error {
 		index, ok := findStaticEntry(*file, original.Name)
 		if !ok {
@@ -91,9 +79,6 @@ func (e *pickerEditor) Duplicate(
 	original domain.Connection,
 	name string,
 ) ([]domain.Connection, error) {
-	if original.Endpoint.Source.Name == "ssh-config" {
-		return nil, fmt.Errorf("SSH config aliases cannot be duplicated")
-	}
 	path, err := e.state.path()
 	if err != nil {
 		return nil, err
@@ -102,13 +87,9 @@ func (e *pickerEditor) Duplicate(
 	if name == "" {
 		return nil, fmt.Errorf("name cannot be empty")
 	}
-	if err := e.checkSSHNameAvailable(ctx, name); err != nil {
-		return nil, err
-	}
-
 	entry := config.EntryFromConnection(original)
 	entry.Name = name
-	connection, err := normalizePickerCandidate(entry.Candidate(domain.SourceRef{
+	connection, err := normalizeCandidate(entry.Candidate(domain.SourceRef{
 		Name: "static",
 		ID:   path,
 	}), path)
@@ -150,26 +131,7 @@ func (e *pickerEditor) Delete(ctx context.Context, connection domain.Connection)
 }
 
 func (e *pickerEditor) reload(ctx context.Context) ([]domain.Connection, error) {
-	catalog, err := e.state.loadCatalog(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return catalog.Connections, nil
-}
-
-func (e *pickerEditor) checkSSHNameAvailable(ctx context.Context, name string) error {
-	sshPath, err := e.state.sshPath()
-	if err != nil {
-		return err
-	}
-	sshCatalog, err := catalog.Build(ctx, discovery.NewSSHConfigSource(sshPath))
-	if err != nil {
-		return err
-	}
-	if _, exists := sshCatalog.Find(strings.TrimSpace(name)); exists {
-		return fmt.Errorf("connection %q already exists", name)
-	}
-	return nil
+	return e.state.loadCatalog(ctx)
 }
 
 func checkStaticNameAvailable(file config.File, name string, ignoredStaticIndex int) error {
@@ -193,8 +155,4 @@ func findStaticEntry(file config.File, name string) (int, bool) {
 		}
 	}
 	return 0, false
-}
-
-func normalizePickerCandidate(candidate domain.Candidate, path string) (domain.Connection, error) {
-	return normalizeCandidate(candidate, path)
 }

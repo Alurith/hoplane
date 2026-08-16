@@ -1,7 +1,8 @@
+//go:build linux
+
 package connector
 
 import (
-	"fmt"
 	"net"
 	"strconv"
 
@@ -9,20 +10,29 @@ import (
 	"github.com/Alurith/hoplane/internal/rdpoptions"
 )
 
-type xfreerdpClient struct{}
+const xfreerdp3ClientID = "xfreerdp3"
 
-func (xfreerdpClient) Name() string {
-	return "xfreerdp"
+type xfreerdp3Client struct{}
+
+func (xfreerdp3Client) ID() string {
+	return xfreerdp3ClientID
 }
 
-func (c xfreerdpClient) Plan(
+func (xfreerdp3Client) Program() string {
+	return "xfreerdp3"
+}
+
+func (xfreerdp3Client) Capabilities() rdpClientCapabilities {
+	return rdpClientCapabilities{
+		Fullscreen:        true,
+		IgnoreCertificate: true,
+	}
+}
+
+func (xfreerdp3Client) Plan(
 	connection domain.Connection,
 	options rdpoptions.Options,
-) (Invocation, error) {
-	if options.Client != "" && options.Client != c.Name() {
-		return Invocation{}, fmt.Errorf("unsupported RDP client %q", options.Client)
-	}
-
+) ([]string, error) {
 	address := net.JoinHostPort(
 		connection.Endpoint.Host,
 		strconv.FormatUint(uint64(connection.Endpoint.Port), 10),
@@ -37,6 +47,5 @@ func (c xfreerdpClient) Plan(
 	if options.IgnoreCertificate {
 		args = append(args, "/cert:ignore")
 	}
-
-	return Invocation{Program: c.Name(), Args: args}, nil
+	return args, nil
 }

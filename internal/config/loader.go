@@ -7,10 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/rdpoptions"
 	"github.com/Alurith/hoplane/internal/safeio"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -97,9 +97,6 @@ func validateConfigDirectoryForLoad(path string) error {
 }
 
 func Save(path string, file File) error {
-	if file.Version == 0 {
-		file.Version = CurrentVersion
-	}
 	if file.Version != CurrentVersion {
 		return fmt.Errorf("cannot save unsupported config version %d", file.Version)
 	}
@@ -166,34 +163,21 @@ func Save(path string, file File) error {
 
 func validatePersistedFile(file File) error {
 	for index, entry := range file.Connections {
-		for namespace, values := range entry.Options {
-			for key := range values {
-				if namespace == sshoptions.Namespace && (key == sshoptions.ConfigFile || key == sshoptions.HostAlias) {
-					return fmt.Errorf("connection %d: SSH option %q is source metadata and cannot be persisted", index, key)
-				}
-				if isSensitiveOptionKey(key) {
-					return fmt.Errorf("connection %d: option %q cannot contain persisted secrets", index, key)
-				}
+		protocol, err := domain.ParseProtocol(entry.Protocol)
+		if err != nil {
+			return fmt.Errorf("connection %d: %w", index, err)
+		}
+
+		switch protocol {
+		case domain.ProtocolSSH:
+			if len(entry.Options) > 0 {
+				return fmt.Errorf("connection %d: SSH options are not supported", index)
+			}
+		case domain.ProtocolRDP:
+			if _, err := rdpoptions.Decode(entry.Options); err != nil {
+				return fmt.Errorf("connection %d: %w", index, err)
 			}
 		}
 	}
 	return nil
-}
-
-func isSensitiveOptionKey(key string) bool {
-	parts := strings.FieldsFunc(strings.ToLower(key), func(r rune) bool {
-		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
-	})
-	for _, part := range parts {
-		switch part {
-		case "password", "passphrase", "secret", "token", "credential", "credentials":
-			return true
-		}
-	}
-	for index, part := range parts {
-		if part == "private" && index+1 < len(parts) && parts[index+1] == "key" {
-			return true
-		}
-	}
-	return false
 }

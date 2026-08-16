@@ -3,19 +3,12 @@ package connector
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
-	"unicode"
 
 	"github.com/Alurith/hoplane/internal/domain"
-	"github.com/Alurith/hoplane/internal/safeio"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 )
 
-// SSHConnector is a process-backed SSH connector. SSH-specific configuration
-// remains in this adapter rather than in the common domain model.
+// SSHConnector is a process-backed SSH connector for standard endpoints.
 type SSHConnector struct {
 	runner ProcessRunner
 }
@@ -44,47 +37,15 @@ func (c SSHConnector) Plan(connection domain.Connection) (Invocation, error) {
 	if connection.Endpoint.Port == 0 {
 		return Invocation{}, fmt.Errorf("SSH connection port cannot be zero")
 	}
-
-	options, err := sshoptions.Decode(connection.Options)
-	if err != nil {
-		return Invocation{}, fmt.Errorf("decode SSH options: %w", err)
-	}
-	metadata, err := sshoptions.DecodeMetadata(connection.Metadata)
-	if err != nil && connection.Metadata != nil {
-		return Invocation{}, fmt.Errorf("decode SSH metadata: %w", err)
+	if len(connection.Options) > 0 {
+		return Invocation{}, fmt.Errorf("SSH options are not supported")
 	}
 
-	args := make([]string, 0, 12)
-	if metadata.ConfigFile != "" {
-		path, err := expandUserPath(metadata.ConfigFile)
-		if err != nil {
-			return Invocation{}, fmt.Errorf("resolve SSH config path: %w", err)
-		}
-		args = append(args, "-F", path)
+	args := []string{"-p", strconv.FormatUint(uint64(connection.Endpoint.Port), 10)}
+	if connection.Endpoint.User != "" {
+		args = append(args, "-l", connection.Endpoint.User)
 	}
-	if options.IdentityFile != "" {
-		path, err := expandUserPath(options.IdentityFile)
-		if err != nil {
-			return Invocation{}, fmt.Errorf("resolve SSH identity file: %w", err)
-		}
-		args = append(args, "-i", path)
-	}
-	if options.ProxyJump != "" {
-		args = append(args, "-J", options.ProxyJump)
-	}
-
-	if metadata.HostAlias != "" {
-		// Do not override the alias's User or Port. OpenSSH must apply the
-		// complete configuration for the alias, including HostName and Match.
-		args = append(args, "--", metadata.HostAlias)
-	} else {
-		args = append(args, "-p", strconv.FormatUint(uint64(connection.Endpoint.Port), 10))
-		if connection.Endpoint.User != "" {
-			args = append(args, "-l", connection.Endpoint.User)
-		}
-		args = append(args, "--", connection.Endpoint.Host)
-	}
-
+	args = append(args, "--", connection.Endpoint.Host)
 	return Invocation{Program: "ssh", Args: args}, nil
 }
 
@@ -100,19 +61,6 @@ func (c SSHConnector) Connect(
 	invocation, err := c.Plan(connection)
 	if err != nil {
 		return err
-	}
-	snapshotPath, cleanup, err := snapshotSSHConfigReference(connection)
-	if err != nil {
-		return err
-	}
-	if cleanup != nil {
-		defer cleanup()
-		for index := range invocation.Args {
-			if invocation.Args[index] == "-F" && index+1 < len(invocation.Args) {
-				invocation.Args[index+1] = snapshotPath
-				break
-			}
-		}
 	}
 
 	program, err := c.runner.LookPath(invocation.Program)
@@ -130,48 +78,4 @@ func (c SSHConnector) Connect(
 		return fmt.Errorf("run ssh: %w", err)
 	}
 	return nil
-}
-
-func snapshotSSHConfigReference(connection domain.Connection) (string, func(), error) {
-	if connection.Metadata == nil {
-		return "", nil, nil
-	}
-	metadata, err := sshoptions.DecodeMetadata(connection.Metadata)
-	if err != nil {
-		return "", nil, fmt.Errorf("decode SSH metadata: %w", err)
-	}
-	path, err := expandUserPath(metadata.ConfigFile)
-	if err != nil {
-		return "", nil, fmt.Errorf("resolve SSH config path: %w", err)
-	}
-	snapshot, cleanup, err := safeio.SnapshotFile(path, safeio.SSHConfigPolicy(1<<20))
-	if err != nil {
-		return "", nil, fmt.Errorf("snapshot SSH config path: %w", err)
-	}
-	return snapshot, cleanup, nil
-}
-
-func expandUserPath(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", fmt.Errorf("path cannot be empty")
-	}
-	if value != "~" && !strings.HasPrefix(value, "~/") && !strings.HasPrefix(value, `~\`) {
-		return filepath.Clean(value), nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	if value == "~" {
-		return filepath.Clean(home), nil
-	}
-	suffix := strings.TrimLeft(value[1:], `/\`)
-	for _, r := range suffix {
-		if unicode.IsControl(r) {
-			return "", fmt.Errorf("path contains a control character")
-		}
-	}
-	return filepath.Clean(filepath.Join(home, filepath.FromSlash(suffix))), nil
 }

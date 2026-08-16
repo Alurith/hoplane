@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/Alurith/hoplane/internal/domain"
@@ -103,8 +104,12 @@ func TestRegistryDryRunUsesPlannerWithoutExecutingConnector(t *testing.T) {
 	}
 }
 
-func TestRegistryDryRunRDPUsesXFREERDP(t *testing.T) {
-	registry, err := NewRegistry(NewRDPConnector(&fakeRunner{path: "/usr/bin/xfreerdp"}))
+func TestRegistryDryRunRDPUsesXFREERDP3WithoutLookup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("xfreerdp3 is currently registered only on Linux")
+	}
+	runner := &fakeRunner{lookupErr: errors.New("dry-run must not look up executables")}
+	registry, err := NewRegistry(NewRDPConnector(runner))
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
@@ -128,9 +133,12 @@ func TestRegistryDryRunRDPUsesXFREERDP(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	const want = "dry-run: connection \"office\" would execute xfreerdp /v:desktop.example.com:3389 /u:alice\n"
+	const want = "dry-run: connection \"office\" would execute xfreerdp3 /v:desktop.example.com:3389 /u:alice\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+	if runner.lookedUp != "" || runner.runCalled {
+		t.Fatal("RDP dry-run touched the process runner")
 	}
 }
 

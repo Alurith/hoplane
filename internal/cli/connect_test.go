@@ -3,19 +3,17 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
-	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/Alurith/hoplane/internal/config"
-	"github.com/Alurith/hoplane/internal/connector"
+	"github.com/Alurith/hoplane/internal/domain"
 )
 
 func TestConnectDryRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	file := config.NewFile()
 	file.Connections = []config.Entry{{
 		Name:     "nas",
@@ -34,7 +32,7 @@ func TestConnectDryRun(t *testing.T) {
 		Errors: &bytes.Buffer{},
 	}
 	if err := Execute(context.Background(), []string{
-		"connect", "nas", "--config", path, "--ssh-config", sshPath, "--dry-run",
+		"connect", "nas", "--config", path, "--dry-run",
 	}, dependencies); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -46,14 +44,21 @@ func TestConnectDryRun(t *testing.T) {
 }
 
 func TestConnectRDPDryRun(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("xfreerdp3 is currently registered only on Linux")
+	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	file := config.NewFile()
 	file.Connections = []config.Entry{{
 		Name:     "office",
 		Protocol: "rdp",
 		Host:     "desktop.example.com",
 		User:     "alice",
+		Options: domain.Options{"rdp": {
+			"client":             "xfreerdp3",
+			"fullscreen":         "true",
+			"ignore_certificate": "true",
+		}},
 	}}
 	if err := config.Save(path, file); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -61,7 +66,7 @@ func TestConnectRDPDryRun(t *testing.T) {
 
 	var output bytes.Buffer
 	if err := Execute(context.Background(), []string{
-		"connect", "office", "--config", path, "--ssh-config", sshPath, "--dry-run",
+		"connect", "office", "--config", path, "--dry-run",
 	}, Dependencies{
 		Input:  strings.NewReader(""),
 		Output: &output,
@@ -70,77 +75,45 @@ func TestConnectRDPDryRun(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	const want = "dry-run: connection \"office\" would execute xfreerdp /v:desktop.example.com:3389 /u:alice\n"
+	const want = "dry-run: connection \"office\" would execute xfreerdp3 /v:desktop.example.com:3389 /u:alice /f /cert:ignore\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
 
-func TestConnectSSHConfigAliasDryRun(t *testing.T) {
+func TestConnectRDPDryRunRejectsUnregisteredClient(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
-	if err := config.Save(path, config.NewFile()); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(sshPath), 0o700); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(sshPath, []byte("Host nas\n    HostName nas.internal\n    Port 2222\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	var output bytes.Buffer
-	if err := Execute(context.Background(), []string{
-		"connect", "nas", "--config", path, "--ssh-config", sshPath, "--dry-run",
-	}, Dependencies{
-		Input:  strings.NewReader(""),
-		Output: &output,
-		Errors: &bytes.Buffer{},
-	}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	want := "dry-run: connection \"nas\" would execute ssh -F " + sshPath + " -- nas\n"
-	if output.String() != want {
-		t.Fatalf("output = %q, want %q", output.String(), want)
-	}
-}
-
-func TestConnectRejectsUnsupportedProtocol(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	file := config.NewFile()
-	port := uint16(3389)
 	file.Connections = []config.Entry{{
 		Name:     "office",
-		Protocol: "custom",
-		Host:     "desktop.local",
-		Port:     &port,
+		Protocol: "rdp",
+		Host:     "desktop.example.com",
+		Options:  domain.Options{"rdp": {"client": "other-client"}},
 	}}
 	if err := config.Save(path, file); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
 	err := Execute(context.Background(), []string{
-		"connect", "office", "--config", path, "--ssh-config", sshPath,
+		"connect", "office", "--config", path, "--dry-run",
 	}, Dependencies{
 		Input:  strings.NewReader(""),
 		Output: &bytes.Buffer{},
 		Errors: &bytes.Buffer{},
 	})
-	if !errors.Is(err, connector.ErrUnsupportedProtocol) {
-		t.Fatalf("Execute() error = %v, want ErrUnsupportedProtocol", err)
+	if err == nil || !strings.Contains(err.Error(), `RDP client "other-client" is not registered`) {
+		t.Fatalf("Execute() error = %v, want unregistered client error", err)
 	}
 }
 
 func TestConnectReportsMissingConnection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	sshPath := filepath.Join(t.TempDir(), "ssh", "config")
 	if err := config.Save(path, config.NewFile()); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
 	err := Execute(context.Background(), []string{
-		"connect", "missing", "--config", path, "--ssh-config", sshPath,
+		"connect", "missing", "--config", path,
 	}, Dependencies{
 		Input:  strings.NewReader(""),
 		Output: &bytes.Buffer{},

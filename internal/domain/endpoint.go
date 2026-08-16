@@ -19,10 +19,6 @@ type SourceRef struct {
 // Options are persisted in the static configuration.
 type Options map[string]map[string]string
 
-// Metadata contains source-owned runtime references. Unlike Options,
-// metadata is never persisted in the static configuration.
-type Metadata map[string]map[string]string
-
 // CloneOptions returns an independent copy of an option set.
 func CloneOptions(options Options) Options {
 	if options == nil {
@@ -31,26 +27,6 @@ func CloneOptions(options Options) Options {
 
 	clone := make(Options, len(options))
 	for namespace, values := range options {
-		if values == nil {
-			clone[namespace] = nil
-			continue
-		}
-		clone[namespace] = make(map[string]string, len(values))
-		for key, value := range values {
-			clone[namespace][key] = value
-		}
-	}
-	return clone
-}
-
-// CloneMetadata returns an independent copy of source metadata.
-func CloneMetadata(metadata Metadata) Metadata {
-	if metadata == nil {
-		return nil
-	}
-
-	clone := make(Metadata, len(metadata))
-	for namespace, values := range metadata {
 		if values == nil {
 			clone[namespace] = nil
 			continue
@@ -74,7 +50,6 @@ type Candidate struct {
 	Tags        []string
 	Source      SourceRef
 	Options     Options
-	Metadata    Metadata
 }
 
 // Endpoint is the normalized, protocol-neutral target used by the catalog and
@@ -94,9 +69,7 @@ type Connection struct {
 	Endpoint    Endpoint
 	Description string
 	Tags        []string
-	Sources     []SourceRef
 	Options     Options
-	Metadata    Metadata
 }
 
 // NormalizeCandidate validates and normalizes a source candidate.
@@ -143,9 +116,6 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 	if containsUnsafeText(source.Name) || containsUnsafeText(source.ID) {
 		return Connection{}, fmt.Errorf("connection %q: source contains unsafe terminal characters", name)
 	}
-	if err := validateMetadata(candidate.Metadata); err != nil {
-		return Connection{}, fmt.Errorf("connection %q: %w", name, err)
-	}
 	if source.Name == "" {
 		source = SourceRef{Name: "unknown"}
 	}
@@ -161,9 +131,7 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 		},
 		Description: strings.TrimSpace(candidate.Description),
 		Tags:        normalizeTags(candidate.Tags),
-		Sources:     []SourceRef{source},
 		Options:     CloneOptions(candidate.Options),
-		Metadata:    CloneMetadata(candidate.Metadata),
 	}, nil
 }
 
@@ -237,20 +205,6 @@ func containsUnsafeText(value string) bool {
 		}
 	}
 	return false
-}
-
-func validateMetadata(metadata Metadata) error {
-	for namespace, values := range metadata {
-		if containsUnsafeText(namespace) {
-			return fmt.Errorf("metadata namespace contains unsafe terminal characters")
-		}
-		for key, value := range values {
-			if containsUnsafeText(key) || containsUnsafeText(value) {
-				return fmt.Errorf("metadata contains unsafe terminal characters")
-			}
-		}
-	}
-	return nil
 }
 
 func normalizeTags(tags []string) []string {

@@ -2,7 +2,7 @@ package config
 
 import "github.com/Alurith/hoplane/internal/domain"
 
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 // File is the persisted hoplane configuration.
 type File struct {

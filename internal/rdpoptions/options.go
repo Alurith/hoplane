@@ -20,17 +20,27 @@ const (
 	IgnoreCertificate = "ignore_certificate"
 )
 
-// Options is the RDP-specific interpretation of domain.Options.
+// Options is the RDP-specific interpretation of domain.Options. Client is a
+// logical adapter ID, never an executable name or path supplied by the user.
 type Options struct {
 	Client            string
 	Fullscreen        bool
 	IgnoreCertificate bool
 }
 
-// Decode extracts and validates options in the RDP namespace. Other
-// namespaces are intentionally ignored so protocol-specific options can
-// coexist in the common option set.
+// Decode validates the complete option set for an RDP connection.
 func Decode(all domain.Options) (Options, error) {
+	namespaces := make([]string, 0, len(all))
+	for namespace := range all {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	for _, namespace := range namespaces {
+		if namespace != Namespace {
+			return Options{}, fmt.Errorf("options namespace %q is not valid for RDP", namespace)
+		}
+	}
+
 	values := all[Namespace]
 	var options Options
 	keys := make([]string, 0, len(values))
@@ -46,6 +56,9 @@ func Decode(all domain.Options) (Options, error) {
 
 		switch key {
 		case Client:
+			if err := validateClientID(value); err != nil {
+				return Options{}, err
+			}
 			options.Client = value
 		case Fullscreen:
 			parsed, err := strconv.ParseBool(value)
@@ -94,6 +107,18 @@ func validateValue(key, value string) error {
 		if r == 0 || unicode.IsControl(r) {
 			return fmt.Errorf("RDP option %q contains a control character", key)
 		}
+	}
+	return nil
+}
+
+func validateClientID(value string) error {
+	for index, r := range value {
+		letter := r >= 'a' && r <= 'z'
+		digit := r >= '0' && r <= '9'
+		if letter || index > 0 && (digit || r == '-') {
+			continue
+		}
+		return fmt.Errorf("RDP option %q must be a logical client ID", Client)
 	}
 	return nil
 }

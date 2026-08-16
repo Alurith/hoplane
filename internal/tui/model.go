@@ -28,9 +28,7 @@ const (
 type listCommand uint8
 
 const (
-	commandNone listCommand = iota
-	commandConnect
-	commandAdd
+	commandAdd listCommand = iota
 	commandEdit
 	commandDuplicate
 	commandDeleteConfirm
@@ -61,13 +59,9 @@ type model struct {
 	pendingName     string
 	pendingIndex    int
 	pendingSelected bool
-	warnings        []string
 }
 
-func NewModel(ctx context.Context, connections []domain.Connection, editor ConnectionEditor, warnings ...string) model {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func NewModel(ctx context.Context, connections []domain.Connection, editor ConnectionEditor) model {
 	items := make([]list.Item, 0, len(connections))
 	for _, connection := range connections {
 		items = append(items, NewItem(connection))
@@ -86,11 +80,10 @@ func NewModel(ctx context.Context, connections []domain.Connection, editor Conne
 	}
 
 	return model{
-		ctx:      ctx,
-		list:     component,
-		editor:   editor,
-		mode:     screenList,
-		warnings: append([]string(nil), warnings...),
+		ctx:    ctx,
+		list:   component,
+		editor: editor,
+		mode:   screenList,
 	}
 }
 
@@ -435,13 +428,6 @@ func (m model) View() tea.View {
 	default:
 		content = m.list.View()
 	}
-	if m.mode == screenList && len(m.warnings) > 0 {
-		warnings := make([]string, 0, len(m.warnings))
-		for _, warning := range m.warnings {
-			warnings = append(warnings, terminal.EscapeControls(warning))
-		}
-		content += "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render("Warnings: "+strings.Join(warnings, " | "))
-	}
 	if m.status != nil {
 		content += "\n\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(terminal.EscapeControls(m.status.Error()))
 	}
@@ -470,16 +456,12 @@ func Pick(
 	editor ConnectionEditor,
 	input io.Reader,
 	output io.Writer,
-	warnings ...string,
 ) (domain.Connection, Action, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	programContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	program := tea.NewProgram(
-		NewModel(programContext, connections, editor, warnings...),
+		NewModel(programContext, connections, editor),
 		tea.WithContext(programContext),
 		tea.WithInput(input),
 		tea.WithOutput(output),

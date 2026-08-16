@@ -9,10 +9,8 @@ import (
 	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/connector"
-	"github.com/Alurith/hoplane/internal/discovery"
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 	"github.com/Alurith/hoplane/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -24,10 +22,9 @@ type Dependencies struct {
 }
 
 type commandState struct {
-	dependencies  Dependencies
-	configPath    string
-	sshConfigPath string
-	registry      connector.Registry
+	dependencies Dependencies
+	configPath   string
+	registry     connector.Registry
 }
 
 func Execute(ctx context.Context, args []string, dependencies Dependencies) error {
@@ -54,7 +51,6 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 	command.SetOut(dependencies.Output)
 	command.SetErr(dependencies.Errors)
 	command.PersistentFlags().StringVarP(&state.configPath, "config", "c", "", "path to the configuration file")
-	command.PersistentFlags().StringVar(&state.sshConfigPath, "ssh-config", "", "path to the OpenSSH configuration file")
 	command.AddCommand(
 		state.newAddCommand(),
 		state.newListCommand(),
@@ -65,60 +61,27 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 	return command
 }
 
-func (s *commandState) loadStaticCatalog(ctx context.Context) (catalog.Catalog, error) {
+func (s *commandState) loadCatalog(ctx context.Context) ([]domain.Connection, error) {
 	path, err := s.path()
 	if err != nil {
-		return catalog.Catalog{}, err
+		return nil, err
 	}
 	file, err := config.Load(path)
 	if err != nil {
-		return catalog.Catalog{}, err
+		return nil, err
 	}
-	return catalog.Build(ctx, discovery.NewStaticSource(file, path))
-}
-
-func (s *commandState) loadSSHCatalog(ctx context.Context) (catalog.Catalog, error) {
-	sshPath, err := s.sshPath()
-	if err != nil {
-		return catalog.Catalog{}, err
-	}
-	return catalog.Build(ctx, discovery.NewSSHConfigSource(sshPath))
-}
-
-func (s *commandState) loadCatalog(ctx context.Context) (catalog.Catalog, error) {
-	staticCatalog, err := s.loadStaticCatalog(ctx)
-	if err != nil {
-		return catalog.Catalog{}, err
-	}
-	sshCatalog, err := s.loadSSHCatalog(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			return catalog.Catalog{}, err
-		}
-		staticCatalog.Warnings = append(staticCatalog.Warnings, catalog.Warning{
-			Source:  "ssh-config",
-			Message: err.Error(),
-		})
-		return staticCatalog, nil
-	}
-	return catalog.Merge(staticCatalog, sshCatalog)
+	return catalog.Build(ctx, file, path)
 }
 
 func (s *commandState) findConnection(ctx context.Context, name string) (domain.Connection, error) {
-	staticCatalog, err := s.loadStaticCatalog(ctx)
+	connections, err := s.loadCatalog(ctx)
 	if err != nil {
 		return domain.Connection{}, err
 	}
-	if connection, ok := staticCatalog.Find(name); ok {
-		return connection, nil
-	}
-
-	sshCatalog, err := s.loadSSHCatalog(ctx)
-	if err != nil {
-		return domain.Connection{}, fmt.Errorf("SSH discovery unavailable: %w", err)
-	}
-	if connection, ok := sshCatalog.Find(name); ok {
-		return connection, nil
+	for _, connection := range connections {
+		if connection.Name == name {
+			return connection, nil
+		}
 	}
 	return domain.Connection{}, fmt.Errorf("connection %q not found", name)
 }
@@ -134,28 +97,17 @@ func (s *commandState) path() (string, error) {
 	return path, nil
 }
 
-func (s *commandState) sshPath() (string, error) {
-	if s.sshConfigPath != "" {
-		return s.sshConfigPath, nil
-	}
-	path, err := discovery.DefaultSSHConfigPath()
-	if err != nil {
-		return "", fmt.Errorf("resolve SSH config path: %w", err)
-	}
-	return path, nil
-}
-
 func (s *commandState) runPick(cmd *cobra.Command, _ []string) error {
 	return s.pick(cmd.Context())
 }
 
 func (s *commandState) pick(ctx context.Context) error {
-	catalog, err := s.loadCatalog(ctx)
+	connections, err := s.loadCatalog(ctx)
 	if err != nil {
 		return err
 	}
 	editor := newPickerEditor(s)
-	connection, action, err := tui.Pick(ctx, catalog.Connections, editor, s.dependencies.Input, s.dependencies.Output, warningMessages(catalog.Warnings)...)
+	connection, action, err := tui.Pick(ctx, connections, editor, s.dependencies.Input, s.dependencies.Output)
 	if err != nil {
 		return fmt.Errorf("run picker: %w", err)
 	}
@@ -163,14 +115,6 @@ func (s *commandState) pick(ctx context.Context) error {
 		return s.connectConnection(ctx, connection, connector.ConnectOptions{})
 	}
 	return nil
-}
-
-func warningMessages(warnings []catalog.Warning) []string {
-	messages := make([]string, 0, len(warnings))
-	for _, warning := range warnings {
-		messages = append(messages, fmt.Sprintf("%s: %s", warning.Source, warning.Message))
-	}
-	return messages
 }
 
 func connectionNameExists(connections []config.Entry, name string) bool {
@@ -202,12 +146,14 @@ func normalizeCandidate(candidate domain.Candidate, sourcePath string) (domain.C
 func validateProtocolOptions(connection domain.Connection) error {
 	switch connection.Endpoint.Protocol {
 	case domain.ProtocolSSH:
-		_, err := sshoptions.Decode(connection.Options)
-		return err
+		if len(connection.Options) > 0 {
+			return fmt.Errorf("SSH options are not supported")
+		}
+		return nil
 	case domain.ProtocolRDP:
 		_, err := rdpoptions.Decode(connection.Options)
 		return err
 	default:
-		return nil
+		return fmt.Errorf("unsupported protocol %q", connection.Endpoint.Protocol)
 	}
 }

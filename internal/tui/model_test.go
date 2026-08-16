@@ -3,12 +3,12 @@ package tui
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Alurith/hoplane/internal/domain"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 )
 
 func TestModelSelectsConnection(t *testing.T) {
@@ -59,57 +59,6 @@ func TestModelConnectsConnection(t *testing.T) {
 	}
 }
 
-func TestEditFormPreservesSSHConfigReference(t *testing.T) {
-	connection := domain.Connection{
-		Name: "nas-copy",
-		Endpoint: domain.Endpoint{
-			Protocol: domain.ProtocolSSH,
-			Host:     "nas",
-			Port:     22,
-		},
-		Options: domain.Options{
-			sshoptions.Namespace: {
-				sshoptions.IdentityFile: "~/.ssh/id_ed25519",
-			},
-		},
-		Metadata: domain.Metadata{
-			sshoptions.Namespace: {
-				sshoptions.ConfigFile: "/home/alice/.ssh/config",
-				sshoptions.HostAlias:  "nas",
-			},
-		},
-	}
-
-	form := newEditForm(connection)
-	candidate, err := form.Candidate()
-	if err != nil {
-		t.Fatalf("Candidate() error = %v", err)
-	}
-	if !reflect.DeepEqual(candidate.Metadata, connection.Metadata) {
-		t.Fatalf("SSH config metadata = %#v, want %#v", candidate.Metadata, connection.Metadata)
-	}
-	ssh := candidate.Options[sshoptions.Namespace]
-	if ssh[sshoptions.IdentityFile] != "~/.ssh/id_ed25519" {
-		t.Fatalf("SSH identity file = %#v, want form value", ssh[sshoptions.IdentityFile])
-	}
-}
-
-func TestEditFormCanCorrectInvalidStoredOptions(t *testing.T) {
-	connection := domain.Connection{
-		Name: "nas",
-		Endpoint: domain.Endpoint{
-			Protocol: domain.ProtocolSSH,
-			Host:     "nas.local",
-			Port:     22,
-		},
-		Options: domain.Options{sshoptions.Namespace: {"unknown": "value"}},
-	}
-
-	if _, err := newEditForm(connection).Candidate(); err != nil {
-		t.Fatalf("Candidate() error = %v, want form to rebuild options", err)
-	}
-}
-
 func TestEditFormPreservesCommaInTags(t *testing.T) {
 	connection := domain.Connection{
 		Name: "nas",
@@ -127,6 +76,46 @@ func TestEditFormPreservesCommaInTags(t *testing.T) {
 	}
 	if !reflect.DeepEqual(candidate.Tags, connection.Tags) {
 		t.Fatalf("tags = %#v, want %#v", candidate.Tags, connection.Tags)
+	}
+}
+
+func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {
+	form := newAddForm()
+	form.values = formValues{
+		Name:                 "office",
+		Protocol:             "rdp",
+		Host:                 "desktop.example.com",
+		RDPClient:            "xfreerdp3",
+		RDPFullscreen:        true,
+		RDPIgnoreCertificate: true,
+	}
+
+	candidate, err := form.Candidate()
+	if err != nil {
+		t.Fatalf("Candidate() error = %v", err)
+	}
+	want := domain.Options{"rdp": {
+		"client":             "xfreerdp3",
+		"fullscreen":         "true",
+		"ignore_certificate": "true",
+	}}
+	if !reflect.DeepEqual(candidate.Options, want) {
+		t.Fatalf("options = %#v, want %#v", candidate.Options, want)
+	}
+}
+
+func TestRDPFormRejectsExecutablePathAsClientID(t *testing.T) {
+	form := newAddForm()
+	form.values = formValues{
+		Name:      "office",
+		Protocol:  "rdp",
+		Host:      "desktop.example.com",
+		RDPClient: "/usr/bin/xfreerdp3",
+	}
+
+	_, err := form.Candidate()
+	if err == nil || !strings.Contains(err.Error(), "must be a logical client ID") {
+		t.Fatalf("Candidate() error = %v, want logical client ID rejection", err)
 	}
 }
 

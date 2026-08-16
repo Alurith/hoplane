@@ -11,7 +11,6 @@ import (
 
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
-	"github.com/Alurith/hoplane/internal/sshoptions"
 	"github.com/Alurith/hoplane/internal/terminal"
 )
 
@@ -23,9 +22,6 @@ type formValues struct {
 	User        string
 	Description string
 	Tags        string
-
-	SSHIdentityFile string
-	SSHProxyJump    string
 
 	RDPClient            string
 	RDPFullscreen        bool
@@ -61,11 +57,6 @@ func newEditForm(connection domain.Connection) connectionForm {
 		Description: connection.Description,
 		Tags:        formatTags(connection.Tags),
 	}
-
-	if options := connection.Options[sshoptions.Namespace]; options != nil {
-		values.SSHIdentityFile = options[sshoptions.IdentityFile]
-		values.SSHProxyJump = options[sshoptions.ProxyJump]
-	}
 	if options := connection.Options[rdpoptions.Namespace]; options != nil {
 		values.RDPClient = options[rdpoptions.Client]
 		values.RDPFullscreen, _ = strconv.ParseBool(options[rdpoptions.Fullscreen])
@@ -86,7 +77,7 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 	protocol := huh.NewSelect[string]().
 		Key("protocol").
 		Title("Protocol").
-		Options(protocolOptions(shared.Protocol)...).
+		Options(protocolOptions()...).
 		Value(&shared.Protocol)
 	host := huh.NewInput().
 		Key("host").
@@ -110,15 +101,12 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		Title("Additional data").
 		Description("Optional fields · Ctrl+S skips this section")
 
-	sshGroup := huh.NewGroup(
-		huh.NewInput().Key("ssh_identity_file").Title("Identity file").Value(&shared.SSHIdentityFile),
-		huh.NewInput().Key("ssh_proxy_jump").Title("Proxy jump").Value(&shared.SSHProxyJump),
-	).Title("SSH options").Description("Optional fields · Ctrl+S skips this section").WithHideFunc(func() bool {
-		return !strings.EqualFold(strings.TrimSpace(shared.Protocol), string(domain.ProtocolSSH))
-	})
-
 	rdpGroup := huh.NewGroup(
-		huh.NewInput().Key("rdp_client").Title("Client").Value(&shared.RDPClient),
+		huh.NewInput().
+			Key("rdp_client").
+			Title("Client ID").
+			Description("Leave empty for the platform default (Linux: xfreerdp3).").
+			Value(&shared.RDPClient),
 		huh.NewConfirm().Key("rdp_fullscreen").Title("Fullscreen").Value(&shared.RDPFullscreen),
 		huh.NewConfirm().Key("rdp_ignore_certificate").Title("Ignore certificate (INSECURE)").Value(&shared.RDPIgnoreCertificate),
 	).Title("RDP options").Description("Optional fields · Ctrl+S skips this section").WithHideFunc(func() bool {
@@ -128,7 +116,6 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 	form := huh.NewForm(
 		huh.NewGroup(name, protocol, host, port).Title(formTitle(mode)),
 		additionalGroup,
-		sshGroup,
 		rdpGroup,
 	)
 	form.CancelCmd = tea.Quit
@@ -180,14 +167,10 @@ func formTitle(mode formMode) string {
 	return "Add connection"
 }
 
-func protocolOptions(current string) []huh.Option[string] {
+func protocolOptions() []huh.Option[string] {
 	options := []huh.Option[string]{
 		huh.NewOption("SSH", string(domain.ProtocolSSH)),
 		huh.NewOption("RDP", string(domain.ProtocolRDP)),
-	}
-	current = strings.ToLower(strings.TrimSpace(current))
-	if current != "" && current != string(domain.ProtocolSSH) && current != string(domain.ProtocolRDP) {
-		options = append(options, huh.NewOption("Current ("+current+")", current))
 	}
 	return options
 }
@@ -222,7 +205,7 @@ func (f connectionForm) SkipOptional() (connectionForm, tea.Cmd, bool) {
 
 func optionalField(field string) bool {
 	switch field {
-	case "user", "description", "tags", "ssh_identity_file", "ssh_proxy_jump", "rdp_client", "rdp_fullscreen", "rdp_ignore_certificate":
+	case "user", "description", "tags", "rdp_client", "rdp_fullscreen", "rdp_ignore_certificate":
 		return true
 	default:
 		return false
@@ -276,7 +259,6 @@ func (f connectionForm) Candidate() (domain.Candidate, error) {
 	}
 	if f.mode == formEdit {
 		candidate.Source = f.original.Endpoint.Source
-		candidate.Metadata = domain.CloneMetadata(f.original.Metadata)
 	}
 
 	normalized, err := domain.NormalizeCandidate(candidate)
@@ -285,8 +267,8 @@ func (f connectionForm) Candidate() (domain.Candidate, error) {
 	}
 	switch normalized.Endpoint.Protocol {
 	case domain.ProtocolSSH:
-		if _, err := sshoptions.Decode(candidate.Options); err != nil {
-			return domain.Candidate{}, err
+		if len(candidate.Options) > 0 {
+			return domain.Candidate{}, fmt.Errorf("SSH options are not supported")
 		}
 	case domain.ProtocolRDP:
 		if _, err := rdpoptions.Decode(candidate.Options); err != nil {
@@ -310,23 +292,7 @@ func (f connectionForm) options() domain.Options {
 	switch protocol {
 	case string(domain.ProtocolSSH):
 		delete(options, rdpoptions.Namespace)
-		values := make(map[string]string, 2)
-		if strings.TrimSpace(f.values.SSHIdentityFile) != "" {
-			values[sshoptions.IdentityFile] = strings.TrimSpace(f.values.SSHIdentityFile)
-		}
-		if strings.TrimSpace(f.values.SSHProxyJump) != "" {
-			values[sshoptions.ProxyJump] = strings.TrimSpace(f.values.SSHProxyJump)
-		}
-		if len(values) > 0 {
-			if options == nil {
-				options = make(domain.Options)
-			}
-			options[sshoptions.Namespace] = values
-		} else {
-			delete(options, sshoptions.Namespace)
-		}
 	case string(domain.ProtocolRDP):
-		delete(options, sshoptions.Namespace)
 		encoded := rdpoptions.Encode(rdpoptions.Options{
 			Client:            strings.TrimSpace(f.values.RDPClient),
 			Fullscreen:        f.values.RDPFullscreen,
@@ -343,7 +309,6 @@ func (f connectionForm) options() domain.Options {
 			delete(options, rdpoptions.Namespace)
 		}
 	default:
-		delete(options, sshoptions.Namespace)
 		delete(options, rdpoptions.Namespace)
 	}
 	if len(options) == 0 {
@@ -397,8 +362,6 @@ func sanitizeFormValues(values formValues) formValues {
 	values.User = terminal.EscapeControls(values.User)
 	values.Description = terminal.EscapeControls(values.Description)
 	values.Tags = terminal.EscapeControls(values.Tags)
-	values.SSHIdentityFile = terminal.EscapeControls(values.SSHIdentityFile)
-	values.SSHProxyJump = terminal.EscapeControls(values.SSHProxyJump)
 	values.RDPClient = terminal.EscapeControls(values.RDPClient)
 	return values
 }

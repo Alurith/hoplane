@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // ProcessRunner abstracts process lookup and execution for connector tests.
@@ -17,8 +18,8 @@ type ProcessRunner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) LookPath(name string) (string, error) {
-	if name != "ssh" && name != "xfreerdp" {
-		return "", fmt.Errorf("executable %q is not allowlisted", name)
+	if err := validateExecutableName(name); err != nil {
+		return "", err
 	}
 	path, err := exec.LookPath(name)
 	if err != nil {
@@ -32,6 +33,22 @@ func (ExecRunner) LookPath(name string) (string, error) {
 		return "", fmt.Errorf("validate executable %q: %w", path, err)
 	}
 	return path, nil
+}
+
+func validateExecutableName(name string) error {
+	if name == "" || name == "." || name == ".." || filepath.IsAbs(name) ||
+		filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
+		return fmt.Errorf("executable %q must be a plain program name", name)
+	}
+	for index, r := range name {
+		letter := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		digit := r >= '0' && r <= '9'
+		if letter || digit || index > 0 && strings.ContainsRune("._+-", r) {
+			continue
+		}
+		return fmt.Errorf("executable %q must be a plain program name", name)
+	}
+	return nil
 }
 
 func (ExecRunner) Run(ctx context.Context, invocation Invocation, streams IO) error {
