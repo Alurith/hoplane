@@ -11,19 +11,23 @@ import (
 	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
+	"github.com/Alurith/hoplane/internal/selfupdate"
 	"github.com/Alurith/hoplane/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 type Dependencies struct {
-	Input  io.Reader
-	Output io.Writer
-	Errors io.Writer
+	Input   io.Reader
+	Output  io.Writer
+	Errors  io.Writer
+	Version string
+	Update  func(context.Context, string) (selfupdate.Result, error)
 }
 
 type commandState struct {
 	dependencies Dependencies
 	configPath   string
+	version      string
 	registry     connector.Registry
 }
 
@@ -35,18 +39,25 @@ func Execute(ctx context.Context, args []string, dependencies Dependencies) erro
 }
 
 func NewRootCommand(dependencies Dependencies) *cobra.Command {
+	version := dependencies.Version
+	if version == "" {
+		version = selfupdate.DevelopmentVersion
+	}
 	state := &commandState{
 		dependencies: dependencies,
+		version:      version,
 		registry:     connector.DefaultRegistry(),
 	}
 	command := &cobra.Command{
 		Use:           "hoplane",
 		Short:         "A protocol-neutral connection directory",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 		RunE:          state.runPick,
 	}
+	command.SetVersionTemplate("{{.Name}} {{.Version}}\n")
 	command.SetIn(dependencies.Input)
 	command.SetOut(dependencies.Output)
 	command.SetErr(dependencies.Errors)
@@ -57,6 +68,7 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 		state.newShowCommand(),
 		state.newPickCommand(),
 		state.newConnectCommand(),
+		state.newUpdateCommand(),
 	)
 	return command
 }

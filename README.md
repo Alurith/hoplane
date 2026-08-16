@@ -19,6 +19,7 @@ makes them easier to access.
 - Dry-run mode to preview connection commands
 - Custom labels, descriptions, tags, users, and ports
 - Native SSH and RDP client integration
+- Verified self-update from GitHub Releases
 - Local YAML configuration
 
 ## Supported platforms
@@ -28,7 +29,7 @@ Linux is currently supported, including RDP connections through
 
 ## Requirements
 
-- Go `1.25.0` to build Hoplane
+- Go `1.25.12` to build Hoplane
 - `ssh` available in `PATH` for SSH connections
 - `xfreerdp3` available in `PATH` for RDP connections on Linux
 
@@ -48,6 +49,30 @@ Alternatively, build a local binary:
 ```bash
 go build -o bin/hoplane ./cmd/hoplane
 ```
+
+## Releases
+
+Releases are published automatically by GoReleaser when a semantic-version tag
+is pushed. The release workflow runs the quality checks first, then builds and
+uploads the archives and `checksums.txt` to GitHub Releases.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Tags must use the `vMAJOR.MINOR.PATCH` format. The generated archives use the
+`hoplane_<version>_<os>_<arch>` naming convention required by self-update.
+
+A released binary can update itself from GitHub Releases after verifying the
+published SHA-256 checksum:
+
+```bash
+hoplane update
+```
+
+The executable directory must be writable. Development builds from `go run`,
+`go build`, or `go install` report that self-update is unavailable.
 
 ## Quick start
 
@@ -105,6 +130,8 @@ hoplane add office \
 | `hoplane list` | Print all connections as JSON |
 | `hoplane show <name>` | Print one connection as JSON |
 | `hoplane connect <name>` | Launch the configured client |
+| `hoplane update` | Update to the latest verified release |
+| `hoplane --version` | Print the installed version |
 
 Use a custom configuration file with:
 
