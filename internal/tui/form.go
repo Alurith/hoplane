@@ -228,6 +228,15 @@ type skipHelpField struct {
 	huh.Field
 }
 
+func (f skipHelpField) Update(msg tea.Msg) (huh.Model, tea.Cmd) {
+	model, command := f.Field.Update(msg)
+	field, ok := model.(huh.Field)
+	if !ok {
+		return model, command
+	}
+	return skipHelpField{Field: field}, command
+}
+
 func (f skipHelpField) KeyBinds() []key.Binding {
 	bindings := append([]key.Binding{skipKey}, f.Field.KeyBinds()...)
 	return bindings

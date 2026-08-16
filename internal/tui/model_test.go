@@ -90,6 +90,18 @@ func TestOptionalFormHelpIncludesSkipAction(t *testing.T) {
 	}
 }
 
+func TestOptionalFormViewIncludesSkipHelp(t *testing.T) {
+	form := newAddForm()
+	form.form.Init()
+	form.form.NextGroup()
+	form.form.Update(tea.WindowSizeMsg{Width: 40, Height: 30})
+
+	view := form.form.View()
+	if !strings.Contains(view, "ctrl+s") {
+		t.Fatalf("optional form view = %q, want Ctrl+S help", view)
+	}
+}
+
 func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {
 	form := newAddForm()
 	form.values = formValues{
