@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
@@ -114,8 +115,16 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 			Title("Domain").
 			Description("Optional: AD domain or remote computer name for a local account.").
 			Value(&shared.RDPDomain),
-		huh.NewConfirm().Key("rdp_fullscreen").Title("Fullscreen").Value(&shared.RDPFullscreen),
-		huh.NewConfirm().Key("rdp_ignore_certificate").Title("Ignore certificate (INSECURE)").Value(&shared.RDPIgnoreCertificate),
+		huh.NewConfirm().
+			Key("rdp_fullscreen").
+			Title("Fullscreen").
+			WithButtonAlignment(lipgloss.Left).
+			Value(&shared.RDPFullscreen),
+		huh.NewConfirm().
+			Key("rdp_ignore_certificate").
+			Title("Ignore certificate (INSECURE)").
+			WithButtonAlignment(lipgloss.Left).
+			Value(&shared.RDPIgnoreCertificate),
 	).Title("RDP options").Description("Optional fields · Ctrl+S skips this section").WithHideFunc(func() bool {
 		return !strings.EqualFold(strings.TrimSpace(shared.Protocol), string(domain.ProtocolRDP))
 	})
