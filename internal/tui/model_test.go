@@ -84,12 +84,10 @@ func TestOptionalFormHelpIncludesSkipAction(t *testing.T) {
 	form.form.Init()
 	form.form.NextGroup()
 
-	for _, binding := range form.form.KeyBinds() {
-		if binding.Help().Key == "ctrl+s" && binding.Help().Desc == "skip this section" {
-			return
-		}
+	bindings := form.form.KeyBinds()
+	if len(bindings) == 0 || bindings[0].Help().Key != "ctrl+s" || bindings[0].Help().Desc != "skip this section" {
+		t.Fatalf("optional form help = %#v, want Ctrl+S skip action first", bindings)
 	}
-	t.Fatal("optional form help does not include Ctrl+S skip action")
 }
 
 func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {

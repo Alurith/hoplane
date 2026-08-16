@@ -229,8 +229,8 @@ type skipHelpField struct {
 }
 
 func (f skipHelpField) KeyBinds() []key.Binding {
-	bindings := append([]key.Binding(nil), f.Field.KeyBinds()...)
-	return append(bindings, skipKey)
+	bindings := append([]key.Binding{skipKey}, f.Field.KeyBinds()...)
+	return bindings
 }
 
 func withSkipHelp(field huh.Field) huh.Field {
