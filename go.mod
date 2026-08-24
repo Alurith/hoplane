@@ -5,7 +5,7 @@ go 1.25.13
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
-	charm.land/huh/v2 v2.0.0
+	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/creativeprojects/go-selfupdate v1.6.0
