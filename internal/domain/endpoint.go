@@ -41,6 +41,7 @@ func CloneOptions(options Options) Options {
 
 // Candidate is a source-specific endpoint before normalization.
 type Candidate struct {
+	ID          string
 	Name        string
 	Protocol    string
 	Host        string
@@ -65,6 +66,7 @@ type Endpoint struct {
 // Connection is the user-facing catalog entry. It gives a named endpoint
 // metadata that is useful to both the CLI and the picker.
 type Connection struct {
+	ID          string
 	Name        string
 	Endpoint    Endpoint
 	Description string
@@ -74,6 +76,13 @@ type Connection struct {
 
 // NormalizeCandidate validates and normalizes a source candidate.
 func NormalizeCandidate(candidate Candidate) (Connection, error) {
+	id := strings.TrimSpace(candidate.ID)
+	if id != "" {
+		if err := ValidateConnectionID(id); err != nil {
+			return Connection{}, fmt.Errorf("connection %q: %w", candidate.Name, err)
+		}
+	}
+
 	name := strings.TrimSpace(candidate.Name)
 	if name == "" {
 		return Connection{}, fmt.Errorf("name cannot be empty")
@@ -121,6 +130,7 @@ func NormalizeCandidate(candidate Candidate) (Connection, error) {
 	}
 
 	return Connection{
+		ID:   id,
 		Name: name,
 		Endpoint: Endpoint{
 			Protocol: protocol,

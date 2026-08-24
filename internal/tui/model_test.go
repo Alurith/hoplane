@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 )
 
 func TestModelSelectsConnection(t *testing.T) {
@@ -77,6 +78,31 @@ func TestEditFormPreservesCommaInTags(t *testing.T) {
 	if !reflect.DeepEqual(candidate.Tags, connection.Tags) {
 		t.Fatalf("tags = %#v, want %#v", candidate.Tags, connection.Tags)
 	}
+}
+
+func TestConnectionFormKeepsPasswordOutOfCandidate(t *testing.T) {
+	form := newAddForm()
+	form.values = formValues{
+		Name:     "office",
+		Protocol: "rdp",
+		Host:     "desktop.example.com",
+		Password: "super-secret",
+	}
+	candidate, err := form.Candidate()
+	if err != nil {
+		t.Fatalf("Candidate() error = %v", err)
+	}
+	if len(candidate.Options) != 0 {
+		t.Fatalf("candidate options = %#v, want no password data", candidate.Options)
+	}
+	change, err := form.SecretChange()
+	if err != nil {
+		t.Fatalf("SecretChange() error = %v", err)
+	}
+	if !change.set || string(change.value) != "super-secret" {
+		t.Fatalf("secret change = %#v", change)
+	}
+	secrets.Clear(change.value)
 }
 
 func TestOptionalFormHelpIncludesSkipAction(t *testing.T) {

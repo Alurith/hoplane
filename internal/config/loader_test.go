@@ -55,14 +55,14 @@ func TestLoadRejectsVersionOneWithoutMigration(t *testing.T) {
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "unsupported version 1, want 2") {
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "unsupported version 1, want 3") {
 		t.Fatalf("Load() error = %v, want version rejection", err)
 	}
 }
 
 func TestLoadRejectsMultipleYAMLDocuments(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 2\nconnections: []\n---\nversion: 2\nconnections: []\n"
+	contents := "version: 3\nconnections: []\n---\nversion: 3\nconnections: []\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -74,7 +74,7 @@ func TestLoadRejectsMultipleYAMLDocuments(t *testing.T) {
 
 func TestLoadRejectsObsoleteSSHOptions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 2\nconnections:\n  - name: legacy\n    protocol: ssh\n    host: example.com\n    options:\n      ssh:\n        identity_file: /tmp/id\n"
+	contents := "version: 3\nconnections:\n  - id: 0123456789abcdef0123456789abcdef\n    name: legacy\n    protocol: ssh\n    host: example.com\n    options:\n      ssh:\n        identity_file: /tmp/id\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestLoadRejectsObsoleteSSHOptions(t *testing.T) {
 
 func TestLoadRejectsRDPOptionsForSSH(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 2\nconnections:\n  - name: nas\n    protocol: ssh\n    host: nas.local\n    options:\n      rdp:\n        fullscreen: \"true\"\n"
+	contents := "version: 3\nconnections:\n  - id: 1123456789abcdef0123456789abcdef\n    name: nas\n    protocol: ssh\n    host: nas.local\n    options:\n      rdp:\n        fullscreen: \"true\"\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -96,7 +96,7 @@ func TestLoadRejectsRDPOptionsForSSH(t *testing.T) {
 
 func TestLoadRejectsNonRDPNamespace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 2\nconnections:\n  - name: office\n    protocol: rdp\n    host: desktop.example.com\n    options:\n      ssh:\n        option: value\n"
+	contents := "version: 3\nconnections:\n  - id: 2123456789abcdef0123456789abcdef\n    name: office\n    protocol: rdp\n    host: desktop.example.com\n    options:\n      ssh:\n        option: value\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestLoadRejectsNonRDPNamespace(t *testing.T) {
 
 func TestLoadRejectsExecutableLikeRDPClient(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 2\nconnections:\n  - name: office\n    protocol: rdp\n    host: desktop.example.com\n    options:\n      rdp:\n        client: /usr/bin/xfreerdp3\n"
+	contents := "version: 3\nconnections:\n  - id: 3123456789abcdef0123456789abcdef\n    name: office\n    protocol: rdp\n    host: desktop.example.com\n    options:\n      rdp:\n        client: /usr/bin/xfreerdp3\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -118,7 +118,7 @@ func TestLoadRejectsExecutableLikeRDPClient(t *testing.T) {
 
 func TestLoadRejectsUnsupportedProtocol(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 2\nconnections:\n  - name: custom\n    protocol: vnc\n    host: example.com\n    port: 5900\n"
+	contents := "version: 3\nconnections:\n  - id: 4123456789abcdef0123456789abcdef\n    name: custom\n    protocol: vnc\n    host: example.com\n    port: 5900\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}

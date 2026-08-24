@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 )
 
 func TestLinuxRDPConnectorPlansXFREERDP3Invocations(t *testing.T) {
@@ -71,6 +72,33 @@ func TestLinuxRDPConnectorPlansXFREERDP3Invocations(t *testing.T) {
 				t.Fatalf("Plan() = %#v, want %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestLinuxRDPConnectorUsesKeyringPasswordThroughArgsFD(t *testing.T) {
+	store := secrets.NewMemoryStore()
+	connection := rdpConnection()
+	connection.ID = "0123456789abcdef0123456789abcdef"
+	password := []byte("correct horse battery staple")
+	if err := store.Store(context.Background(), secrets.Ref{ConnectionID: connection.ID, Protocol: secrets.ProtocolRDP, Kind: secrets.LoginPassword}, password); err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+	runner := &fakeRunner{path: "/usr/bin/xfreerdp3"}
+	if err := NewRDPConnector(runner, store).Connect(context.Background(), connection, IO{}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	if !runner.secureCalled || runner.runCalled {
+		t.Fatalf("secureCalled=%v runCalled=%v", runner.secureCalled, runner.runCalled)
+	}
+	if !reflect.DeepEqual(runner.secureInvocation.Args, []string{"/args-from:fd:3"}) {
+		t.Fatalf("secure invocation = %#v", runner.secureInvocation)
+	}
+	payload := string(runner.secureRequest.Payload)
+	if !strings.Contains(payload, "/p:"+string(password)+"\n") {
+		t.Fatalf("payload does not contain password argument: %q", payload)
+	}
+	if strings.Contains(runner.secureInvocation.String(), string(password)) {
+		t.Fatal("password appeared in RDP invocation")
 	}
 }
 

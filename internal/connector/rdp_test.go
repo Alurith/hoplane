@@ -55,7 +55,7 @@ func connectorWithRDPClients(
 	for _, client := range clients {
 		registered[client.ID()] = client
 	}
-	return newRDPConnector(runner, defaultClient, registered)
+	return newRDPConnector(runner, nil, defaultClient, registered)
 }
 
 func TestRDPConnectorSelectsDefaultClient(t *testing.T) {
@@ -107,7 +107,7 @@ func TestRDPConnectorRejectsUnregisteredClient(t *testing.T) {
 }
 
 func TestRDPConnectorRejectsMissingPlatformDefault(t *testing.T) {
-	_, err := newRDPConnector(&fakeRunner{}, "", nil).Plan(rdpConnection())
+	_, err := newRDPConnector(&fakeRunner{}, nil, "", nil).Plan(rdpConnection())
 	if err == nil || !strings.Contains(err.Error(), "no RDP client is registered for platform") {
 		t.Fatalf("Plan() error = %v, want missing platform client error", err)
 	}

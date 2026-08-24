@@ -26,6 +26,7 @@ func (xfreerdp3Client) Capabilities() rdpClientCapabilities {
 	return rdpClientCapabilities{
 		Fullscreen:        true,
 		IgnoreCertificate: true,
+		PasswordTransport: SecretTransportRDPArgsFD,
 	}
 }
 

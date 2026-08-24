@@ -9,16 +9,21 @@ import (
 	"testing"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 )
 
 type fakeRunner struct {
-	path       string
-	lookupErr  error
-	runErr     error
-	lookedUp   string
-	invocation Invocation
-	streams    IO
-	runCalled  bool
+	path             string
+	lookupErr        error
+	runErr           error
+	lookedUp         string
+	invocation       Invocation
+	streams          IO
+	runCalled        bool
+	secureCalled     bool
+	secureInvocation Invocation
+	secureRequest    SecretProcessRequest
+	secureErr        error
 }
 
 func (r *fakeRunner) LookPath(name string) (string, error) {
@@ -34,6 +39,16 @@ func (r *fakeRunner) Run(_ context.Context, invocation Invocation, streams IO) e
 	r.invocation = invocation
 	r.streams = streams
 	return r.runErr
+}
+
+func (r *fakeRunner) RunWithSecret(_ context.Context, invocation Invocation, _ IO, request SecretProcessRequest) error {
+	r.secureCalled = true
+	r.secureInvocation = invocation
+	r.secureRequest = SecretProcessRequest{
+		Transport: request.Transport,
+		Payload:   append([]byte(nil), request.Payload...),
+	}
+	return r.secureErr
 }
 
 func TestSSHConnectorPlansInvocation(t *testing.T) {
@@ -147,6 +162,40 @@ func TestSSHConnectorForwardsStreamsAndRunsProcess(t *testing.T) {
 	}
 	if runner.streams.Input != input || runner.streams.Output != &output || runner.streams.Errors != &diagnostics {
 		t.Fatal("connector did not forward all streams")
+	}
+}
+
+func TestSSHConnectorUsesKeyringPasswordWithoutExposingItInArgs(t *testing.T) {
+	store := secrets.NewMemoryStore()
+	connection := domain.Connection{
+		ID:       "0123456789abcdef0123456789abcdef",
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "nas.local", Port: 22, User: "alice"},
+	}
+	password := []byte("correct horse battery staple")
+	if err := store.Store(context.Background(), secrets.Ref{ConnectionID: connection.ID, Protocol: secrets.ProtocolSSH, Kind: secrets.LoginPassword}, password); err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+	runner := &fakeRunner{path: "/usr/bin/ssh"}
+	if err := NewSSHConnector(runner, store).Connect(context.Background(), connection, IO{}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	if !runner.secureCalled || runner.runCalled {
+		t.Fatalf("secureCalled=%v runCalled=%v", runner.secureCalled, runner.runCalled)
+	}
+	if runner.secureRequest.Transport != SecretTransportSSHAskpass || string(runner.secureRequest.Payload) != string(password) {
+		t.Fatalf("secure request = %#v", runner.secureRequest)
+	}
+	if strings.Contains(runner.secureInvocation.String(), string(password)) {
+		t.Fatal("password appeared in SSH invocation")
+	}
+	wantSecureArgs := []string{
+		"-o", "PreferredAuthentications=password",
+		"-o", "KbdInteractiveAuthentication=no",
+		"-o", "NumberOfPasswordPrompts=1",
+		"--", "nas.local",
+	}
+	if !reflect.DeepEqual(runner.secureInvocation.Args[len(runner.secureInvocation.Args)-len(wantSecureArgs):], wantSecureArgs) {
+		t.Fatalf("secure args = %#v", runner.secureInvocation.Args)
 	}
 }
 

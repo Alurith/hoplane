@@ -32,7 +32,7 @@ func validateExecutable(path string) error {
 		if err != nil {
 			return err
 		}
-		if !directoryInfo.IsDir() || directoryInfo.Mode().Perm()&0o022 != 0 {
+		if !directoryInfo.IsDir() || directoryInfo.Mode().Perm()&0o022 != 0 && directoryInfo.Mode()&os.ModeSticky == 0 {
 			return fmt.Errorf("executable directory is unsafe")
 		}
 		if !ownedByRootOrCurrent(directoryInfo) {

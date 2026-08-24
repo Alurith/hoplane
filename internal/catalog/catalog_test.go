@@ -11,8 +11,8 @@ import (
 func TestBuildNormalizesAndSortsStaticConnections(t *testing.T) {
 	file := config.NewFile()
 	file.Connections = []config.Entry{
-		{Name: "zulu", Protocol: "rdp", Host: "display.local"},
-		{Name: "alpha", Protocol: "ssh", Host: "nas.local"},
+		{ID: "0123456789abcdef0123456789abcdef", Name: "zulu", Protocol: "rdp", Host: "display.local"},
+		{ID: "1123456789abcdef0123456789abcdef", Name: "alpha", Protocol: "ssh", Host: "nas.local"},
 	}
 
 	connections, err := Build(context.Background(), file, "config.yaml")

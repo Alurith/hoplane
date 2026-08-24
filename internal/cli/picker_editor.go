@@ -7,6 +7,7 @@ import (
 
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 )
 
 type pickerEditor struct {
@@ -22,6 +23,7 @@ func (e *pickerEditor) CanModify(connection domain.Connection) bool {
 }
 
 func (e *pickerEditor) Create(ctx context.Context, candidate domain.Candidate) ([]domain.Connection, error) {
+	candidate.ID = ""
 	path, err := e.state.path()
 	if err != nil {
 		return nil, err
@@ -54,20 +56,30 @@ func (e *pickerEditor) Update(
 	if err != nil {
 		return nil, err
 	}
+	candidate.ID = original.ID
 	connection, err := normalizeCandidate(candidate, path)
 	if err != nil {
 		return nil, err
 	}
-	if err := config.Update(ctx, path, func(file *config.File) error {
-		index, ok := findStaticEntry(*file, original.Name)
+	if err := config.WithLock(ctx, path, func() error {
+		file, err := config.Load(path)
+		if err != nil {
+			return err
+		}
+		index, ok := findStaticEntry(file, original.ID)
 		if !ok {
 			return fmt.Errorf("static connection %q not found", original.Name)
 		}
-		if err := checkStaticNameAvailable(*file, connection.Name, index); err != nil {
+		if err := checkStaticNameAvailable(file, connection.Name, index); err != nil {
 			return err
 		}
+		if original.Endpoint.Protocol != connection.Endpoint.Protocol {
+			if err := e.state.clearPasswordProtocolLocked(ctx, original, string(original.Endpoint.Protocol)); err != nil {
+				return fmt.Errorf("clear password after protocol change: %w", err)
+			}
+		}
 		file.Connections[index] = config.EntryFromConnection(connection)
-		return nil
+		return config.Save(path, file)
 	}); err != nil {
 		return nil, err
 	}
@@ -88,6 +100,7 @@ func (e *pickerEditor) Duplicate(
 		return nil, fmt.Errorf("name cannot be empty")
 	}
 	entry := config.EntryFromConnection(original)
+	entry.ID = ""
 	entry.Name = name
 	connection, err := normalizeCandidate(entry.Candidate(domain.SourceRef{
 		Name: "static",
@@ -117,13 +130,20 @@ func (e *pickerEditor) Delete(ctx context.Context, connection domain.Connection)
 	if err != nil {
 		return nil, err
 	}
-	if err := config.Update(ctx, path, func(file *config.File) error {
-		index, ok := findStaticEntry(*file, connection.Name)
+	if err := config.WithLock(ctx, path, func() error {
+		file, err := config.Load(path)
+		if err != nil {
+			return err
+		}
+		index, ok := findStaticEntry(file, connection.ID)
 		if !ok {
 			return fmt.Errorf("static connection %q not found", connection.Name)
 		}
+		if err := e.state.clearPasswordLocked(ctx, connection); err != nil {
+			return fmt.Errorf("clear password after delete: %w", err)
+		}
 		file.Connections = append(file.Connections[:index], file.Connections[index+1:]...)
-		return nil
+		return config.Save(path, file)
 	}); err != nil {
 		return nil, err
 	}
@@ -132,6 +152,26 @@ func (e *pickerEditor) Delete(ctx context.Context, connection domain.Connection)
 
 func (e *pickerEditor) reload(ctx context.Context) ([]domain.Connection, error) {
 	return e.state.loadCatalog(ctx)
+}
+
+func (e *pickerEditor) SetPassword(ctx context.Context, connection domain.Connection, value []byte) error {
+	if err := secrets.ValidateSecretForProtocol(string(connection.Endpoint.Protocol), value); err != nil {
+		return err
+	}
+	return e.state.storePassword(ctx, connection, value)
+}
+
+func (e *pickerEditor) ClearPassword(ctx context.Context, connection domain.Connection) error {
+	return e.state.clearPassword(ctx, connection)
+}
+
+func passwordRef(connection domain.Connection) secrets.Ref {
+	protocol := string(connection.Endpoint.Protocol)
+	return secrets.Ref{
+		ConnectionID: connection.ID,
+		Protocol:     protocol,
+		Kind:         secrets.LoginPassword,
+	}
 }
 
 func checkStaticNameAvailable(file config.File, name string, ignoredStaticIndex int) error {
@@ -147,10 +187,10 @@ func checkStaticNameAvailable(file config.File, name string, ignoredStaticIndex 
 	return nil
 }
 
-func findStaticEntry(file config.File, name string) (int, bool) {
-	name = strings.TrimSpace(name)
+func findStaticEntry(file config.File, id string) (int, bool) {
+	id = strings.TrimSpace(id)
 	for index, entry := range file.Connections {
-		if strings.TrimSpace(entry.Name) == name {
+		if strings.TrimSpace(entry.ID) == id {
 			return index, true
 		}
 	}

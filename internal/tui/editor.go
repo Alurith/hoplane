@@ -16,3 +16,10 @@ type ConnectionEditor interface {
 	Duplicate(context.Context, domain.Connection, string) ([]domain.Connection, error)
 	Delete(context.Context, domain.Connection) ([]domain.Connection, error)
 }
+
+// SecretEditor is implemented by editors that manage the connection password
+// outside the catalog. The password never crosses the domain model.
+type SecretEditor interface {
+	SetPassword(context.Context, domain.Connection, []byte) error
+	ClearPassword(context.Context, domain.Connection) error
+}

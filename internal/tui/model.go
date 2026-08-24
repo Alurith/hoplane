@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 	"github.com/Alurith/hoplane/internal/terminal"
 )
 
@@ -113,12 +114,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateMutation(message)
 	case tea.KeyPressMsg:
 		if key.Matches(message, quitKey) {
+			if m.mode == screenConnectionForm {
+				m.form.dispose()
+			}
 			m.quitting = true
 			return m, tea.Quit
 		}
 		switch m.mode {
 		case screenConnectionForm:
 			if message.String() == "esc" {
+				m.form.dispose()
 				m.mode = screenList
 				m.status = nil
 				return m, nil
@@ -249,17 +254,26 @@ func (m model) submitConnectionForm(command tea.Cmd) (model, tea.Cmd) {
 
 	candidate, err := m.form.Candidate()
 	if err != nil {
+		m.form.dispose()
 		m.status = err
 		m.form = reopenConnectionForm(m.form)
 		return m, m.form.form.Init()
 	}
+	secret, err := m.form.SecretChange()
+	if err != nil {
+		m.form.dispose()
+		m.status = err
+		m.form = reopenConnectionForm(m.form)
+		return m, m.form.form.Init()
+	}
+	m.form.dispose()
 	m.status = nil
 	m.mode = screenSaving
 	original := domain.Connection{}
 	if m.form.mode == formEdit {
 		original = m.form.original
 	}
-	return m, tea.Batch(command, m.mutationCommand(commandForForm(m.form), candidate, original, ""))
+	return m, tea.Batch(command, m.mutationCommand(commandForForm(m.form), candidate, original, "", secret))
 }
 
 func (m model) updateDuplicateForm(message tea.Msg) (model, tea.Cmd) {
@@ -276,7 +290,7 @@ func (m model) updateDuplicateForm(message tea.Msg) (model, tea.Cmd) {
 	}
 	m.status = nil
 	m.mode = screenSaving
-	return m, tea.Batch(command, m.mutationCommand(commandDuplicate, domain.Candidate{}, m.duplicate.source, name))
+	return m, tea.Batch(command, m.mutationCommand(commandDuplicate, domain.Candidate{}, m.duplicate.source, name, secretChange{}))
 }
 
 func (m model) updateDeleteConfirmation(message tea.Msg) (model, tea.Cmd) {
@@ -291,7 +305,7 @@ func (m model) updateDeleteConfirmation(message tea.Msg) (model, tea.Cmd) {
 	}
 	m.status = nil
 	m.mode = screenSaving
-	return m, tea.Batch(command, m.mutationCommand(commandDeleteConfirm, domain.Candidate{}, m.confirm.source, ""))
+	return m, tea.Batch(command, m.mutationCommand(commandDeleteConfirm, domain.Candidate{}, m.confirm.source, "", secretChange{}))
 }
 
 type mutationMsg struct {
@@ -308,8 +322,9 @@ func commandForForm(form connectionForm) listCommand {
 	return commandAdd
 }
 
-func (m model) mutationCommand(command listCommand, candidate domain.Candidate, original domain.Connection, name string) tea.Cmd {
+func (m model) mutationCommand(command listCommand, candidate domain.Candidate, original domain.Connection, name string, secret secretChange) tea.Cmd {
 	return func() tea.Msg {
+		defer secrets.Clear(secret.value)
 		if m.editor == nil {
 			return mutationMsg{err: fmt.Errorf("connection editor is not configured")}
 		}
@@ -329,6 +344,9 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 		default:
 			return mutationMsg{err: fmt.Errorf("unknown picker command")}
 		}
+		if err == nil {
+			err = m.applySecretChange(secret, command, original, candidate, connections)
+		}
 		result := mutationMsg{connections: connections, err: err}
 		if command == commandDeleteConfirm {
 			result.selectIndex = m.list.Index()
@@ -340,6 +358,44 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 		}
 		return result
 	}
+}
+
+func (m model) applySecretChange(change secretChange, command listCommand, original domain.Connection, candidate domain.Candidate, connections []domain.Connection) error {
+	if !change.set && !change.clear {
+		return nil
+	}
+	editor, ok := m.editor.(SecretEditor)
+	if !ok {
+		return fmt.Errorf("secret editor is not configured")
+	}
+	if command == commandDeleteConfirm {
+		return editor.ClearPassword(m.ctx, original)
+	}
+
+	var target domain.Connection
+	if original.ID != "" {
+		for _, connection := range connections {
+			if connection.ID == original.ID {
+				target = connection
+				break
+			}
+		}
+	}
+	if target.ID == "" {
+		for _, connection := range connections {
+			if connection.Name == strings.TrimSpace(candidate.Name) {
+				target = connection
+				break
+			}
+		}
+	}
+	if target.ID == "" {
+		return fmt.Errorf("saved connection %q not found for secret update", candidate.Name)
+	}
+	if change.clear {
+		return editor.ClearPassword(m.ctx, target)
+	}
+	return editor.SetPassword(m.ctx, target, change.value)
 }
 
 func (m model) updateMutation(message mutationMsg) (tea.Model, tea.Cmd) {

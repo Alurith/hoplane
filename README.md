@@ -6,9 +6,9 @@ Hoplane is a fast, focused terminal companion for SSH and RDP. It turns your
 connection list into an organized, searchable workspace, so you can reach the
 right server or desktop in seconds.
 
-It uses the native clients you already trust, never stores passwords or
-credentials, and does not replace OpenSSH or your RDP application. It simply
-makes them easier to access.
+It uses the native clients you already trust, stores optional login passwords
+in the system keyring, and does not replace OpenSSH or your RDP application. It
+simply makes them easier to access.
 
 ## Features
 
@@ -19,19 +19,22 @@ makes them easier to access.
 - Dry-run mode to preview connection commands
 - Custom labels, descriptions, tags, users, and ports
 - Native SSH and RDP client integration
+- Optional password storage in the system keyring without command-line exposure
 - Verified self-update from GitHub Releases
 - Local YAML configuration
 
 ## Supported platforms
 
 Linux is currently supported, including RDP connections through
-`xfreerdp3`. Support for additional platforms is in progress.
+`xfreerdp3`. On other platforms the default password backend is unavailable
+and password automation fails closed; native keyring backends are future work.
 
 ## Requirements
 
 - Go `1.25.13` to build Hoplane
 - `ssh` available in `PATH` for SSH connections
 - `xfreerdp3` available in `PATH` for RDP connections on Linux
+- `/usr/bin/secret-tool` and an unlocked Secret Service keyring for stored passwords
 
 ## Installation
 
@@ -140,6 +143,20 @@ Open the interactive picker:
 hoplane
 ```
 
+Store a password without putting it in shell history or process arguments:
+
+```bash
+hoplane secret set office
+hoplane secret status office
+hoplane secret clear office
+```
+
+`secret set` reads a hidden password from a TTY, or one line from stdin when
+input is redirected. The password is not accepted as a flag, argv value,
+environment variable, YAML field or command output. Linux requires
+`/usr/bin/secret-tool` and an unlocked Secret Service keyring; an unavailable
+backend is an error, not a plaintext fallback.
+
 Add an RDP connection:
 
 ```bash
@@ -161,6 +178,7 @@ hoplane add office \
 | `hoplane list` | Print all connections as JSON |
 | `hoplane show <name>` | Print one connection as JSON |
 | `hoplane connect <name>` | Launch the configured client |
+| `hoplane secret set/clear/status <name>` | Manage the login password in the system keyring |
 | `hoplane update` | Update to the latest verified release |
 | `hoplane --version` | Print the installed version |
 
@@ -219,10 +237,12 @@ By default, Hoplane reads:
 Example configuration:
 
 ```yaml
-version: 2
+version: 3
 
+# Version 3 requires an immutable id on every connection.
 connections:
-  - name: office
+  - id: 5855fc97344cf34c1b1fb886f267d2f2
+    name: office
     protocol: rdp
     host: desktop.example.com
     user: alice
@@ -234,7 +254,8 @@ connections:
         domain: CONTOSO
         fullscreen: "true"
 
-  - name: nas
+  - id: 6855fc97344cf34c1b1fb886f267d2f2
+    name: nas
     protocol: ssh
     host: nas.local
     user: alice
@@ -247,6 +268,7 @@ connections:
 
 | Field | Description |
 | --- | --- |
+| `id` | Stable opaque connection identifier; used for secrets |
 | `name` | Connection name |
 | `protocol` | `ssh` or `rdp` |
 | `host` | Hostname or IP address |
@@ -279,8 +301,17 @@ Hoplane launches the local `ssh` client:
 ssh -p 22 -l alice -- nas.local
 ```
 
-Your existing OpenSSH configuration, agent, and keys remain available. Hoplane
-does not manage SSH credentials or replace the SSH client.
+Your existing OpenSSH configuration, agent, and keys remain available. An
+optional login password can be stored in the system keyring. When present,
+Hoplane supplies it through a one-shot `SSH_ASKPASS` helper using a
+short-lived owner-only temporary file; it is never an argv element or
+environment value. SSH passwords are limited to 1023
+bytes and the helper accepts only OpenSSH's exact
+`<user>@<host>'s password:` prompt, with at most one trailing ASCII space.
+Password authentication is restricted to OpenSSH's normal password method and
+`NumberOfPasswordPrompts=1`. Key passphrases, MFA, OTP and
+keyboard-interactive authentication remain the responsibility of OpenSSH and
+your agent.
 
 ### RDP
 
@@ -290,8 +321,10 @@ On Linux, Hoplane launches `xfreerdp3`:
 xfreerdp3 /v:desktop.example.com:3389 /u:alice /d:CONTOSO /f
 ```
 
-Hoplane does not store passwords or pass them as command-line arguments.
-Authentication remains handled by the local RDP client.
+An optional RDP login password is stored in the system keyring and passed to
+FreeRDP through `/args-from:fd:3`. The password uses its own 1 MiB limit and
+is not placed in the process arguments, environment or configuration file.
+`connect --dry-run` never reads the keyring and never includes a password.
 
 Certificate validation can be disabled explicitly with:
 
@@ -300,6 +333,27 @@ Certificate validation can be disabled explicitly with:
 ```
 
 Use this option only for trusted test environments.
+
+## Password security
+
+The keyring is the only persistent password store. Hoplane rejects password
+values containing NUL, carriage-return or newline characters because both the
+FreeRDP argument channel and SSH askpass are line-oriented. SSH passwords are
+limited to 1023 bytes; RDP passwords have a separate 1 MiB limit. Secrets are
+cleared from application buffers on a best-effort basis; Linux core dumps are
+disabled and dumpability is reduced, but Go/runtime and client copies cannot be
+physically guaranteed away.
+
+This protects against process-list inspection, shell history, configuration
+backups and ordinary application logs. It does not protect against root,
+malware or ptrace access from the same user, a compromised keyring, or copies
+already made by libraries and clients.
+
+Connection IDs are opaque and immutable in YAML and JSON. Renaming a connection
+does not change its keyring entry; duplicating a connection creates a new ID and
+does not copy its password. Deleting a connection also deletes its keyring
+entry. Hoplane rejects older configuration versions; it does not perform an
+automatic v2 migration.
 
 ## Dry run
 
@@ -325,6 +379,7 @@ Example:
 {
   "version": 2,
   "connection": {
+    "id": "6855fc97344cf34c1b1fb886f267d2f2",
     "name": "nas",
     "protocol": "ssh",
     "host": "nas.local",
@@ -339,7 +394,8 @@ Example:
 ```
 
 RDP connections also expose their validated options and certificate security
-status.
+status. JSON contains the opaque connection ID and public connection metadata
+only; it never performs a keyring lookup or contains a password.
 
 ## Development
 

@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 	"github.com/Alurith/hoplane/internal/terminal"
 )
 
@@ -16,6 +17,7 @@ var (
 	ErrUnsupportedProtocol = errors.New("unsupported protocol")
 	ErrDryRunUnsupported   = errors.New("dry-run unsupported")
 	ErrClientUnavailable   = errors.New("required client unavailable")
+	ErrSecureTransport     = errors.New("secure secret transport unavailable")
 )
 
 // IO contains the streams a connector may use for an interactive connection.
@@ -97,10 +99,17 @@ func NewRegistry(connectors ...Connector) (Registry, error) {
 	return Registry{connectors: registered}, nil
 }
 
-func DefaultRegistry() Registry {
+func DefaultRegistry(store ...secrets.Store) Registry {
+	var secretStore secrets.Store
+	if len(store) > 0 {
+		secretStore = store[0]
+	}
+	if secretStore == nil {
+		secretStore = secrets.NewDefaultStore()
+	}
 	return Registry{connectors: map[domain.Protocol]Connector{
-		domain.ProtocolSSH: NewSSHConnector(ExecRunner{}),
-		domain.ProtocolRDP: NewRDPConnector(ExecRunner{}),
+		domain.ProtocolSSH: NewSSHConnector(ExecRunner{}, secretStore),
+		domain.ProtocolRDP: NewRDPConnector(ExecRunner{}, secretStore),
 	}}
 }
 

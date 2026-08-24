@@ -13,17 +13,20 @@ import (
 
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
+	"github.com/Alurith/hoplane/internal/secrets"
 	"github.com/Alurith/hoplane/internal/terminal"
 )
 
 type formValues struct {
-	Name        string
-	Protocol    string
-	Host        string
-	Port        string
-	User        string
-	Description string
-	Tags        string
+	Name          string
+	Protocol      string
+	Host          string
+	Port          string
+	User          string
+	Description   string
+	Tags          string
+	Password      string
+	ClearPassword bool
 
 	RDPClient            string
 	RDPDomain            string
@@ -39,11 +42,12 @@ const (
 )
 
 type connectionForm struct {
-	form       *huh.Form
-	mode       formMode
-	original   domain.Connection
-	values     formValues
-	liveValues *formValues
+	form          *huh.Form
+	mode          formMode
+	original      domain.Connection
+	values        formValues
+	liveValues    *formValues
+	passwordInput *huh.Input
 }
 
 func newAddForm() connectionForm {
@@ -109,6 +113,26 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		Title("Additional data").
 		Description("Optional fields")
 
+	passwordInput := huh.NewInput().
+		Key("password").
+		Title("Password").
+		Description("Stored in the system keyring; leave empty to keep the existing value.").
+		EchoMode(huh.EchoModePassword).
+		// CharLimit is only a UI guard; every submit path validates by protocol.
+		CharLimit(secrets.MaxRDPPasswordBytes).
+		Value(&shared.Password)
+	secretGroup := huh.NewGroup(
+		withSkipHelp(passwordInput),
+	).Title("Credentials").Description("Optional password")
+
+	clearSecretGroup := huh.NewGroup(
+		withSkipHelp(huh.NewConfirm().
+			Key("clear_password").
+			Title("Clear stored password").
+			WithButtonAlignment(lipgloss.Left).
+			Value(&shared.ClearPassword)),
+	).Title("Credentials").WithHideFunc(func() bool { return mode != formEdit })
+
 	rdpGroup := huh.NewGroup(
 		withSkipHelp(huh.NewInput().
 			Key("rdp_client").
@@ -137,15 +161,22 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 	form := huh.NewForm(
 		huh.NewGroup(name, protocol, host, port).Title(formTitle(mode)),
 		additionalGroup,
+		secretGroup,
+		clearSecretGroup,
 		rdpGroup,
 	)
-	form.CancelCmd = tea.Quit
+	form.CancelCmd = func() tea.Msg {
+		shared.Password = ""
+		passwordInput.Value(&shared.Password)
+		return tea.Quit()
+	}
 	return connectionForm{
-		form:       form,
-		mode:       mode,
-		original:   original,
-		values:     values,
-		liveValues: shared,
+		form:          form,
+		mode:          mode,
+		original:      original,
+		values:        values,
+		liveValues:    shared,
+		passwordInput: passwordInput,
 	}
 }
 
@@ -228,6 +259,13 @@ type skipHelpField struct {
 	huh.Field
 }
 
+func (f skipHelpField) GetValue() any {
+	if f.Field.GetKey() == "password" {
+		return ""
+	}
+	return f.Field.GetValue()
+}
+
 func (f skipHelpField) Update(msg tea.Msg) (huh.Model, tea.Cmd) {
 	model, command := f.Field.Update(msg)
 	field, ok := model.(huh.Field)
@@ -248,7 +286,7 @@ func withSkipHelp(field huh.Field) huh.Field {
 
 func optionalField(field string) bool {
 	switch field {
-	case "user", "description", "tags", "rdp_client", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
+	case "user", "description", "tags", "password", "clear_password", "rdp_client", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
 		return true
 	default:
 		return false
@@ -265,7 +303,11 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 	if f.liveValues != nil {
 		*f.liveValues = f.values
 	}
-	updated, command := f.form.Update(sanitizeTextMessage(msg))
+	formMessage := sanitizeTextMessage(msg)
+	if field := f.form.GetFocusedField(); field != nil && field.GetKey() == "password" {
+		formMessage = msg
+	}
+	updated, command := f.form.Update(formMessage)
 	if form, ok := updated.(*huh.Form); ok {
 		f.form = form
 	}
@@ -301,6 +343,7 @@ func (f connectionForm) Candidate() (domain.Candidate, error) {
 		Options:     f.options(),
 	}
 	if f.mode == formEdit {
+		candidate.ID = f.original.ID
 		candidate.Source = f.original.Endpoint.Source
 	}
 
@@ -359,6 +402,47 @@ func (f connectionForm) options() domain.Options {
 		return nil
 	}
 	return options
+}
+
+type secretChange struct {
+	value []byte
+	set   bool
+	clear bool
+}
+
+func (f connectionForm) SecretChange() (secretChange, error) {
+	if f.values.ClearPassword && f.values.Password != "" {
+		return secretChange{}, fmt.Errorf("clear password cannot be combined with a new password")
+	}
+	if f.values.ClearPassword {
+		return secretChange{clear: true}, nil
+	}
+	if f.values.Password == "" {
+		return secretChange{}, nil
+	}
+	value := []byte(f.values.Password)
+	if err := secrets.ValidateSecretForProtocol(strings.ToLower(strings.TrimSpace(f.values.Protocol)), value); err != nil {
+		secrets.Clear(value)
+		return secretChange{}, err
+	}
+	return secretChange{value: value, set: true}, nil
+}
+
+func (f *connectionForm) clearPassword() {
+	f.values.Password = ""
+	if f.liveValues != nil {
+		f.liveValues.Password = ""
+		if f.passwordInput != nil {
+			f.passwordInput.Value(&f.liveValues.Password)
+		}
+	}
+}
+
+func (f *connectionForm) dispose() {
+	f.clearPassword()
+	f.form = nil
+	f.liveValues = nil
+	f.passwordInput = nil
 }
 
 func (f connectionForm) Completed() bool {

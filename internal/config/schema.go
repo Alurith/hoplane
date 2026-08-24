@@ -2,7 +2,7 @@ package config
 
 import "github.com/Alurith/hoplane/internal/domain"
 
-const CurrentVersion = 2
+const CurrentVersion = 3
 
 // File is the persisted hoplane configuration.
 type File struct {
@@ -12,6 +12,7 @@ type File struct {
 
 // Entry is the user-facing, declarative representation of a connection.
 type Entry struct {
+	ID          string         `yaml:"id"`
 	Name        string         `yaml:"name"`
 	Protocol    string         `yaml:"protocol"`
 	Host        string         `yaml:"host"`
@@ -28,6 +29,7 @@ func NewFile() File {
 
 func (e Entry) Candidate(source domain.SourceRef) domain.Candidate {
 	return domain.Candidate{
+		ID:          e.ID,
 		Name:        e.Name,
 		Protocol:    e.Protocol,
 		Host:        e.Host,
@@ -43,6 +45,7 @@ func (e Entry) Candidate(source domain.SourceRef) domain.Candidate {
 func EntryFromConnection(connection domain.Connection) Entry {
 	port := connection.Endpoint.Port
 	return Entry{
+		ID:          connection.ID,
 		Name:        connection.Name,
 		Protocol:    string(connection.Endpoint.Protocol),
 		Host:        connection.Endpoint.Host,

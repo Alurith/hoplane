@@ -11,6 +11,7 @@ import (
 const Version = 2
 
 type Connection struct {
+	ID          string           `json:"id,omitempty"`
 	Name        string           `json:"name"`
 	Protocol    string           `json:"protocol"`
 	Host        string           `json:"host"`
@@ -39,6 +40,7 @@ type ConnectionResponse struct {
 
 func FromDomain(connection domain.Connection) Connection {
 	result := Connection{
+		ID:          connection.ID,
 		Name:        connection.Name,
 		Protocol:    string(connection.Endpoint.Protocol),
 		Host:        connection.Endpoint.Host,

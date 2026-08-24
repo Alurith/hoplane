@@ -9,11 +9,12 @@ import (
 	"github.com/Alurith/hoplane/internal/safeio"
 )
 
-// Update serializes a read-modify-write transaction for one configuration
-// path. The lock is held through validation and the atomic replacement.
-func Update(ctx context.Context, path string, mutate func(*File) error) error {
-	if mutate == nil {
-		return fmt.Errorf("config mutation cannot be nil")
+// WithLock runs an operation while holding the same private configuration lock
+// used by read-modify-write updates. It is used for side effects keyed by a
+// connection ID, such as keyring changes, so delete/set cannot race.
+func WithLock(ctx context.Context, path string, action func() error) error {
+	if action == nil {
+		return fmt.Errorf("locked configuration action cannot be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -47,18 +48,32 @@ func Update(ctx context.Context, path string, mutate func(*File) error) error {
 	}
 	defer release()
 
-	file, err := Load(path)
-	if err != nil {
-		return err
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := mutate(&file); err != nil {
-		return err
+	return action()
+}
+
+// Update serializes a read-modify-write transaction for one configuration
+// path. The lock is held through validation and the atomic replacement.
+func Update(ctx context.Context, path string, mutate func(*File) error) error {
+	if mutate == nil {
+		return fmt.Errorf("config mutation cannot be nil")
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return Save(path, file)
+	return WithLock(ctx, path, func() error {
+		file, err := Load(path)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := mutate(&file); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return Save(path, file)
+	})
 }

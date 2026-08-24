@@ -2,22 +2,32 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/Alurith/hoplane/internal/secrets"
 )
 
 // SSHConnector is a process-backed SSH connector for standard endpoints.
 type SSHConnector struct {
-	runner ProcessRunner
+	runner      ProcessRunner
+	secretStore secrets.Store
 }
 
-func NewSSHConnector(runner ProcessRunner) SSHConnector {
+func NewSSHConnector(runner ProcessRunner, store ...secrets.Store) SSHConnector {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return SSHConnector{runner: runner}
+	var secretStore secrets.Store
+	if len(store) > 0 {
+		secretStore = store[0]
+	}
+	if secretStore == nil {
+		secretStore = secrets.NewDefaultStore()
+	}
+	return SSHConnector{runner: runner, secretStore: secretStore}
 }
 
 func (SSHConnector) Protocol() domain.Protocol {
@@ -74,8 +84,65 @@ func (c SSHConnector) Connect(
 	}
 	invocation.Program = program
 
-	if err := c.runner.Run(ctx, invocation, streams); err != nil {
-		return fmt.Errorf("run ssh: %w", err)
+	secret, err := c.lookupPassword(ctx, connection)
+	if errors.Is(err, secrets.ErrNotFound) {
+		secrets.Clear(secret)
+		if err := c.runner.Run(ctx, invocation, streams); err != nil {
+			return fmt.Errorf("run ssh: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		secrets.Clear(secret)
+		return err
+	}
+	if err := secrets.ValidateSecretForProtocol(secrets.ProtocolSSH, secret); err != nil {
+		secrets.Clear(secret)
+		return err
+	}
+
+	secureRunner, ok := c.runner.(SecretProcessRunner)
+	if !ok {
+		secrets.Clear(secret)
+		return fmt.Errorf("%w for SSH", ErrSecureTransport)
+	}
+	invocation.Args = sshPasswordArgs(invocation.Args)
+	if err := secureRunner.RunWithSecret(ctx, invocation, streams, SecretProcessRequest{
+		Transport: SecretTransportSSHAskpass,
+		Payload:   secret,
+	}); err != nil {
+		return fmt.Errorf("run ssh with keyring password: %w", err)
 	}
 	return nil
+}
+
+func (c SSHConnector) lookupPassword(ctx context.Context, connection domain.Connection) ([]byte, error) {
+	if connection.ID == "" || c.secretStore == nil {
+		return nil, secrets.ErrNotFound
+	}
+	return c.secretStore.Lookup(ctx, secrets.Ref{
+		ConnectionID: connection.ID,
+		Protocol:     secrets.ProtocolSSH,
+		Kind:         secrets.LoginPassword,
+	})
+}
+
+func sshPasswordArgs(args []string) []string {
+	separator := len(args)
+	for index, value := range args {
+		if value == "--" {
+			separator = index
+			break
+		}
+	}
+	options := []string{
+		"-o", "PreferredAuthentications=password",
+		"-o", "KbdInteractiveAuthentication=no",
+		"-o", "NumberOfPasswordPrompts=1",
+	}
+	result := make([]string, 0, len(args)+len(options))
+	result = append(result, args[:separator]...)
+	result = append(result, options...)
+	result = append(result, args[separator:]...)
+	return result
 }

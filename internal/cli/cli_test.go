@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,7 +12,56 @@ import (
 
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/output"
+	"github.com/Alurith/hoplane/internal/secrets"
 )
+
+func TestReadSecretAcceptsMaxSizedCRLFLine(t *testing.T) {
+	input := append(bytes.Repeat([]byte{'a'}, secrets.MaxSSHAskpassBytes), '\r', '\n')
+	value, err := readSecret(bytes.NewReader(input), &bytes.Buffer{}, secrets.ProtocolSSH)
+	if err != nil {
+		t.Fatalf("readSecret() error = %v", err)
+	}
+	defer secrets.Clear(value)
+	if len(value) != secrets.MaxSSHAskpassBytes {
+		t.Fatalf("readSecret() length = %d, want %d", len(value), secrets.MaxSSHAskpassBytes)
+	}
+}
+
+func TestSecretCommandsManageSSHPasswordWithoutPrintingIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	store := secrets.NewMemoryStore()
+	var outputBuffer bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"add", "nas", "--config", path, "--protocol", "ssh", "--host", "nas.local", "--user", "alice",
+	}, Dependencies{Input: bytes.NewBuffer(nil), Output: &outputBuffer, Errors: &bytes.Buffer{}, SecretStore: store}); err != nil {
+		t.Fatalf("add error = %v", err)
+	}
+	outputBuffer.Reset()
+	if err := Execute(context.Background(), []string{"secret", "set", "nas", "--config", path}, Dependencies{
+		Input: bytes.NewBufferString("super-secret\n"), Output: &outputBuffer, Errors: &bytes.Buffer{}, SecretStore: store,
+	}); err != nil {
+		t.Fatalf("secret set error = %v", err)
+	}
+	if strings.Contains(outputBuffer.String(), "super-secret") {
+		t.Fatal("secret appeared in command output")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(contents), "super-secret") {
+		t.Fatal("secret appeared in configuration")
+	}
+	outputBuffer.Reset()
+	if err := Execute(context.Background(), []string{"secret", "status", "nas", "--config", path}, Dependencies{
+		Input: bytes.NewBuffer(nil), Output: &outputBuffer, Errors: &bytes.Buffer{}, SecretStore: store,
+	}); err != nil {
+		t.Fatalf("secret status error = %v", err)
+	}
+	if outputBuffer.String() != "nas: configured\n" {
+		t.Fatalf("status = %q", outputBuffer.String())
+	}
+}
 
 func TestAddPersistsStandardSSH(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")

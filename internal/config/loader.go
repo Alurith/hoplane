@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
@@ -103,6 +104,9 @@ func Save(path string, file File) error {
 	if file.Connections == nil {
 		file.Connections = []Entry{}
 	}
+	if err := ensurePersistedIDs(&file); err != nil {
+		return fmt.Errorf("ensure connection IDs: %w", err)
+	}
 	if len(file.Connections) > MaxConnections {
 		return fmt.Errorf("config contains too many connections (max %d)", MaxConnections)
 	}
@@ -161,8 +165,42 @@ func Save(path string, file File) error {
 	return nil
 }
 
+func ensurePersistedIDs(file *File) error {
+	if file == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+	seen := make(map[string]struct{}, len(file.Connections))
+	for index := range file.Connections {
+		entry := &file.Connections[index]
+		if strings.TrimSpace(entry.ID) == "" {
+			id, err := domain.NewConnectionID()
+			if err != nil {
+				return fmt.Errorf("connection %d: %w", index, err)
+			}
+			entry.ID = id
+		}
+		if err := domain.ValidateConnectionID(entry.ID); err != nil {
+			return fmt.Errorf("connection %d: %w", index, err)
+		}
+		if _, exists := seen[entry.ID]; exists {
+			return fmt.Errorf("duplicate connection ID %q", entry.ID)
+		}
+		seen[entry.ID] = struct{}{}
+	}
+	return nil
+}
+
 func validatePersistedFile(file File) error {
+	seenIDs := make(map[string]struct{}, len(file.Connections))
 	for index, entry := range file.Connections {
+		if err := domain.ValidateConnectionID(entry.ID); err != nil {
+			return fmt.Errorf("connection %d: %w", index, err)
+		}
+		if _, exists := seenIDs[entry.ID]; exists {
+			return fmt.Errorf("duplicate connection ID %q", entry.ID)
+		}
+		seenIDs[entry.ID] = struct{}{}
+
 		protocol, err := domain.ParseProtocol(entry.Protocol)
 		if err != nil {
 			return fmt.Errorf("connection %d: %w", index, err)

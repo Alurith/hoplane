@@ -56,6 +56,7 @@ func TestRDPOutputDoesNotExposeInvalidExecutableLikeClient(t *testing.T) {
 func TestWriteList(t *testing.T) {
 	var output bytes.Buffer
 	err := WriteList(&output, []domain.Connection{{
+		ID:   "0123456789abcdef0123456789abcdef",
 		Name: "nas",
 		Endpoint: domain.Endpoint{
 			Protocol: domain.ProtocolSSH,
@@ -73,6 +74,12 @@ func TestWriteList(t *testing.T) {
 	}
 	if decoded.Version != 2 || len(decoded.Connections) != 1 || decoded.Connections[0].Protocol != "ssh" {
 		t.Fatalf("decoded = %#v", decoded)
+	}
+	if decoded.Connections[0].ID != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("connection ID = %q", decoded.Connections[0].ID)
+	}
+	if bytes.Contains(output.Bytes(), []byte("password")) || bytes.Contains(output.Bytes(), []byte("secret")) {
+		t.Fatalf("JSON contains secret-related value: %s", output.Bytes())
 	}
 
 	var object map[string]json.RawMessage

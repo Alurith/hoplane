@@ -23,6 +23,9 @@ func Build(ctx context.Context, file config.File, path string) ([]domain.Connect
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if err := domain.ValidateConnectionID(entry.ID); err != nil {
+			return nil, fmt.Errorf("connection %q: %w", entry.Name, err)
+		}
 		candidate := entry.Candidate(source)
 		connection, err := domain.NormalizeCandidate(candidate)
 		if err != nil {

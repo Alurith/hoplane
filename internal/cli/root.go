@@ -11,17 +11,19 @@ import (
 	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/rdpoptions"
+	"github.com/Alurith/hoplane/internal/secrets"
 	"github.com/Alurith/hoplane/internal/selfupdate"
 	"github.com/Alurith/hoplane/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 type Dependencies struct {
-	Input   io.Reader
-	Output  io.Writer
-	Errors  io.Writer
-	Version string
-	Update  func(context.Context, string) (selfupdate.Result, error)
+	Input       io.Reader
+	Output      io.Writer
+	Errors      io.Writer
+	Version     string
+	SecretStore secrets.Store
+	Update      func(context.Context, string) (selfupdate.Result, error)
 }
 
 type commandState struct {
@@ -29,6 +31,7 @@ type commandState struct {
 	configPath   string
 	version      string
 	registry     connector.Registry
+	secretStore  secrets.Store
 }
 
 func Execute(ctx context.Context, args []string, dependencies Dependencies) error {
@@ -43,10 +46,15 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 	if version == "" {
 		version = selfupdate.DevelopmentVersion
 	}
+	secretStore := dependencies.SecretStore
+	if secretStore == nil {
+		secretStore = secrets.NewDefaultStore()
+	}
 	state := &commandState{
 		dependencies: dependencies,
 		version:      version,
-		registry:     connector.DefaultRegistry(),
+		registry:     connector.DefaultRegistry(secretStore),
+		secretStore:  secretStore,
 	}
 	command := &cobra.Command{
 		Use:           "hoplane",
@@ -68,6 +76,7 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 		state.newShowCommand(),
 		state.newPickCommand(),
 		state.newConnectCommand(),
+		state.newSecretCommand(),
 		state.newUpdateCommand(),
 	)
 	return command
@@ -144,6 +153,13 @@ func normalizeEntry(entry config.Entry, sourcePath string) (domain.Connection, e
 }
 
 func normalizeCandidate(candidate domain.Candidate, sourcePath string) (domain.Connection, error) {
+	if strings.TrimSpace(candidate.ID) == "" {
+		id, err := domain.NewConnectionID()
+		if err != nil {
+			return domain.Connection{}, err
+		}
+		candidate.ID = id
+	}
 	candidate.Source = domain.SourceRef{Name: "static", ID: sourcePath}
 	connection, err := domain.NormalizeCandidate(candidate)
 	if err != nil {
