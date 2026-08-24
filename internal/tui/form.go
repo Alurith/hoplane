@@ -18,15 +18,16 @@ import (
 )
 
 type formValues struct {
-	Name          string
-	Protocol      string
-	Host          string
-	Port          string
-	User          string
-	Description   string
-	Tags          string
-	Password      string
-	ClearPassword bool
+	Name                 string
+	Protocol             string
+	Host                 string
+	Port                 string
+	User                 string
+	Description          string
+	Tags                 string
+	Password             string
+	PasswordAction       string
+	PasswordConfirmation string
 
 	RDPClient            string
 	RDPDomain            string
@@ -41,13 +42,21 @@ const (
 	formEdit
 )
 
+const (
+	passwordActionSet    = "set"
+	passwordActionNone   = "none"
+	passwordActionKeep   = "keep"
+	passwordActionRemove = "remove"
+)
+
 type connectionForm struct {
-	form          *huh.Form
-	mode          formMode
-	original      domain.Connection
-	values        formValues
-	liveValues    *formValues
-	passwordInput *huh.Input
+	form                      *huh.Form
+	mode                      formMode
+	original                  domain.Connection
+	values                    formValues
+	liveValues                *formValues
+	passwordInput             *huh.Input
+	passwordConfirmationInput *huh.Input
 }
 
 func newAddForm() connectionForm {
@@ -76,6 +85,9 @@ func newEditForm(connection domain.Connection) connectionForm {
 
 func newConnectionForm(mode formMode, original domain.Connection, values formValues) connectionForm {
 	values = sanitizeFormValues(values)
+	if values.PasswordAction == "" {
+		values.PasswordAction = defaultPasswordAction(mode)
+	}
 	shared := &values
 	name := huh.NewInput().
 		Key("name").
@@ -113,25 +125,37 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		Title("Additional data").
 		Description("Optional fields")
 
+	passwordAction := huh.NewSelect[string]().
+		Key("password_action").
+		Title("Password").
+		Description("Choose how to handle the stored password.").
+		Options(passwordActionOptions(mode)...).
+		Value(&shared.PasswordAction)
 	passwordInput := huh.NewInput().
 		Key("password").
-		Title("Password").
-		Description("Stored in the system keyring; leave empty to keep the existing value.").
+		Title("New password").
+		Description("Enter the new password.").
 		EchoMode(huh.EchoModePassword).
 		// CharLimit is only a UI guard; every submit path validates by protocol.
 		CharLimit(secrets.MaxRDPPasswordBytes).
 		Value(&shared.Password)
-	secretGroup := huh.NewGroup(
+	passwordConfirmationInput := huh.NewInput().
+		Key("password_confirmation").
+		Title("Confirm password").
+		Description("Enter the new password again.").
+		EchoMode(huh.EchoModePassword).
+		// CharLimit is only a UI guard; every submit path validates by protocol.
+		CharLimit(secrets.MaxRDPPasswordBytes).
+		Value(&shared.PasswordConfirmation)
+	secretActionGroup := huh.NewGroup(
+		withSkipHelp(passwordAction),
+	).Title("Credentials")
+	secretInputGroup := huh.NewGroup(
 		withSkipHelp(passwordInput),
-	).Title("Credentials").Description("Optional password")
-
-	clearSecretGroup := huh.NewGroup(
-		withSkipHelp(huh.NewConfirm().
-			Key("clear_password").
-			Title("Clear stored password").
-			WithButtonAlignment(lipgloss.Left).
-			Value(&shared.ClearPassword)),
-	).Title("Credentials").WithHideFunc(func() bool { return mode != formEdit })
+		withSkipHelp(passwordConfirmationInput),
+	).Title("Set password").WithHideFunc(func() bool {
+		return shared.PasswordAction != passwordActionSet
+	})
 
 	rdpGroup := huh.NewGroup(
 		withSkipHelp(huh.NewInput().
@@ -161,22 +185,25 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 	form := huh.NewForm(
 		huh.NewGroup(name, protocol, host, port).Title(formTitle(mode)),
 		additionalGroup,
-		secretGroup,
-		clearSecretGroup,
+		secretActionGroup,
+		secretInputGroup,
 		rdpGroup,
 	)
 	form.CancelCmd = func() tea.Msg {
 		shared.Password = ""
+		shared.PasswordConfirmation = ""
 		passwordInput.Value(&shared.Password)
+		passwordConfirmationInput.Value(&shared.PasswordConfirmation)
 		return tea.Quit()
 	}
 	return connectionForm{
-		form:          form,
-		mode:          mode,
-		original:      original,
-		values:        values,
-		liveValues:    shared,
-		passwordInput: passwordInput,
+		form:                      form,
+		mode:                      mode,
+		original:                  original,
+		values:                    values,
+		liveValues:                shared,
+		passwordInput:             passwordInput,
+		passwordConfirmationInput: passwordConfirmationInput,
 	}
 }
 
@@ -217,6 +244,27 @@ func formTitle(mode formMode) string {
 		return "Edit connection"
 	}
 	return "Add connection"
+}
+
+func defaultPasswordAction(mode formMode) string {
+	if mode == formEdit {
+		return passwordActionKeep
+	}
+	return passwordActionSet
+}
+
+func passwordActionOptions(mode formMode) []huh.Option[string] {
+	if mode == formEdit {
+		return []huh.Option[string]{
+			huh.NewOption("Keep current password", passwordActionKeep),
+			huh.NewOption("Set a new password", passwordActionSet),
+			huh.NewOption("Remove stored password", passwordActionRemove),
+		}
+	}
+	return []huh.Option[string]{
+		huh.NewOption("Set password", passwordActionSet),
+		huh.NewOption("No password", passwordActionNone),
+	}
 }
 
 func protocolOptions() []huh.Option[string] {
@@ -260,7 +308,7 @@ type skipHelpField struct {
 }
 
 func (f skipHelpField) GetValue() any {
-	if f.Field.GetKey() == "password" {
+	if f.Field.GetKey() == "password" || f.Field.GetKey() == "password_confirmation" {
 		return ""
 	}
 	return f.Field.GetValue()
@@ -286,7 +334,7 @@ func withSkipHelp(field huh.Field) huh.Field {
 
 func optionalField(field string) bool {
 	switch field {
-	case "user", "description", "tags", "password", "clear_password", "rdp_client", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
+	case "user", "description", "tags", "password_action", "password", "password_confirmation", "rdp_client", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
 		return true
 	default:
 		return false
@@ -304,7 +352,7 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 		*f.liveValues = f.values
 	}
 	formMessage := sanitizeTextMessage(msg)
-	if field := f.form.GetFocusedField(); field != nil && field.GetKey() == "password" {
+	if field := f.form.GetFocusedField(); field != nil && (field.GetKey() == "password" || field.GetKey() == "password_confirmation") {
 		formMessage = msg
 	}
 	updated, command := f.form.Update(formMessage)
@@ -313,6 +361,9 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 	}
 	f.syncValues()
 	f.sanitizeValues()
+	if f.values.PasswordAction != passwordActionSet {
+		f.clearPassword()
+	}
 	return f, command
 }
 
@@ -411,29 +462,47 @@ type secretChange struct {
 }
 
 func (f connectionForm) SecretChange() (secretChange, error) {
-	if f.values.ClearPassword && f.values.Password != "" {
-		return secretChange{}, fmt.Errorf("clear password cannot be combined with a new password")
+	action := f.values.PasswordAction
+	if action == "" {
+		action = defaultPasswordAction(f.mode)
 	}
-	if f.values.ClearPassword {
-		return secretChange{clear: true}, nil
-	}
-	if f.values.Password == "" {
+	switch action {
+	case passwordActionKeep, passwordActionNone:
 		return secretChange{}, nil
+	case passwordActionRemove:
+		if f.mode != formEdit {
+			return secretChange{}, fmt.Errorf("remove password is only available when editing")
+		}
+		return secretChange{clear: true}, nil
+	case passwordActionSet:
+		if f.values.Password == "" {
+			return secretChange{}, fmt.Errorf("password cannot be empty")
+		}
+		if f.values.Password != f.values.PasswordConfirmation {
+			return secretChange{}, fmt.Errorf("passwords do not match")
+		}
+		value := []byte(f.values.Password)
+		if err := secrets.ValidateSecretForProtocol(strings.ToLower(strings.TrimSpace(f.values.Protocol)), value); err != nil {
+			secrets.Clear(value)
+			return secretChange{}, err
+		}
+		return secretChange{value: value, set: true}, nil
+	default:
+		return secretChange{}, fmt.Errorf("unknown password action %q", action)
 	}
-	value := []byte(f.values.Password)
-	if err := secrets.ValidateSecretForProtocol(strings.ToLower(strings.TrimSpace(f.values.Protocol)), value); err != nil {
-		secrets.Clear(value)
-		return secretChange{}, err
-	}
-	return secretChange{value: value, set: true}, nil
 }
 
 func (f *connectionForm) clearPassword() {
 	f.values.Password = ""
+	f.values.PasswordConfirmation = ""
 	if f.liveValues != nil {
 		f.liveValues.Password = ""
+		f.liveValues.PasswordConfirmation = ""
 		if f.passwordInput != nil {
 			f.passwordInput.Value(&f.liveValues.Password)
+		}
+		if f.passwordConfirmationInput != nil {
+			f.passwordConfirmationInput.Value(&f.liveValues.PasswordConfirmation)
 		}
 	}
 }
@@ -443,6 +512,7 @@ func (f *connectionForm) dispose() {
 	f.form = nil
 	f.liveValues = nil
 	f.passwordInput = nil
+	f.passwordConfirmationInput = nil
 }
 
 func (f connectionForm) Completed() bool {

@@ -83,10 +83,12 @@ func TestEditFormPreservesCommaInTags(t *testing.T) {
 func TestConnectionFormKeepsPasswordOutOfCandidate(t *testing.T) {
 	form := newAddForm()
 	form.values = formValues{
-		Name:     "office",
-		Protocol: "rdp",
-		Host:     "desktop.example.com",
-		Password: "super-secret",
+		Name:                 "office",
+		Protocol:             "rdp",
+		Host:                 "desktop.example.com",
+		PasswordAction:       passwordActionSet,
+		Password:             "super-secret",
+		PasswordConfirmation: "super-secret",
 	}
 	candidate, err := form.Candidate()
 	if err != nil {
@@ -103,6 +105,66 @@ func TestConnectionFormKeepsPasswordOutOfCandidate(t *testing.T) {
 		t.Fatalf("secret change = %#v", change)
 	}
 	secrets.Clear(change.value)
+}
+
+func TestNewAndEditFormsUseDifferentPasswordDefaults(t *testing.T) {
+	if got := newAddForm().values.PasswordAction; got != passwordActionSet {
+		t.Fatalf("new form password action = %q, want %q", got, passwordActionSet)
+	}
+	if got := newEditForm(domain.Connection{}).values.PasswordAction; got != passwordActionKeep {
+		t.Fatalf("edit form password action = %q, want %q", got, passwordActionKeep)
+	}
+}
+
+func TestSecretChangeRejectsEmptyPasswordWhenSet(t *testing.T) {
+	form := newAddForm()
+	form.values.Protocol = "ssh"
+	form.values.PasswordAction = passwordActionSet
+
+	_, err := form.SecretChange()
+	if err == nil || err.Error() != "password cannot be empty" {
+		t.Fatalf("SecretChange() error = %v, want empty password error", err)
+	}
+}
+
+func TestSecretChangeRequiresMatchingConfirmation(t *testing.T) {
+	form := newAddForm()
+	form.values.Protocol = "ssh"
+	form.values.PasswordAction = passwordActionSet
+	form.values.Password = "super-secret"
+	form.values.PasswordConfirmation = "different"
+
+	_, err := form.SecretChange()
+	if err == nil || err.Error() != "passwords do not match" {
+		t.Fatalf("SecretChange() error = %v, want confirmation error", err)
+	}
+}
+
+func TestSecretChangeRemovesPasswordExplicitly(t *testing.T) {
+	form := newEditForm(domain.Connection{})
+	form.values.PasswordAction = passwordActionRemove
+
+	change, err := form.SecretChange()
+	if err != nil {
+		t.Fatalf("SecretChange() error = %v", err)
+	}
+	if !change.clear || change.set || change.value != nil {
+		t.Fatalf("secret change = %#v, want clear only", change)
+	}
+}
+
+func TestSecretChangeKeepsPasswordByDefault(t *testing.T) {
+	form := newEditForm(domain.Connection{})
+	form.values.Password = "must-not-be-used"
+	form.values.PasswordConfirmation = "must-not-be-used"
+
+	change, err := form.SecretChange()
+	if err != nil {
+		t.Fatalf("SecretChange() error = %v", err)
+	}
+	if change.set || change.clear || change.value != nil {
+		t.Fatalf("secret change = %#v, want no change", change)
+	}
 }
 
 func TestOptionalFormHelpIncludesSkipAction(t *testing.T) {
