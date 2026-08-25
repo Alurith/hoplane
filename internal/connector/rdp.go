@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/Alurith/hoplane/internal/domain"
@@ -13,29 +12,13 @@ import (
 	"github.com/Alurith/hoplane/internal/secrets"
 )
 
-// RDPConnector selects a registered platform client and executes its plan.
+// RDPConnector executes the platform's RDP client.
 type RDPConnector struct {
-	runner        ProcessRunner
-	secretStore   secrets.Store
-	defaultClient string
-	clients       map[string]rdpClient
-}
-
-type rdpClient interface {
-	ID() string
-	Program() string
-	Capabilities() rdpClientCapabilities
-	Plan(domain.Connection, rdpoptions.Options) ([]string, error)
-}
-
-type rdpClientCapabilities struct {
-	Fullscreen        bool
-	IgnoreCertificate bool
-	PasswordTransport SecretTransport
+	runner      ProcessRunner
+	secretStore secrets.Store
 }
 
 func NewRDPConnector(runner ProcessRunner, store ...secrets.Store) RDPConnector {
-	defaultClient, clients := platformRDPClients()
 	var secretStore secrets.Store
 	if len(store) > 0 {
 		secretStore = store[0]
@@ -43,24 +26,10 @@ func NewRDPConnector(runner ProcessRunner, store ...secrets.Store) RDPConnector 
 	if secretStore == nil {
 		secretStore = secrets.NewDefaultStore()
 	}
-	return newRDPConnector(runner, secretStore, defaultClient, clients)
-}
-
-func newRDPConnector(
-	runner ProcessRunner,
-	secretStore secrets.Store,
-	defaultClient string,
-	clients map[string]rdpClient,
-) RDPConnector {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return RDPConnector{
-		runner:        runner,
-		secretStore:   secretStore,
-		defaultClient: defaultClient,
-		clients:       clients,
-	}
+	return RDPConnector{runner: runner, secretStore: secretStore}
 }
 
 func (RDPConnector) Protocol() domain.Protocol {
@@ -68,77 +37,31 @@ func (RDPConnector) Protocol() domain.Protocol {
 }
 
 func (c RDPConnector) Plan(connection domain.Connection) (Invocation, error) {
-	_, invocation, err := c.plan(connection)
-	return invocation, err
-}
-
-func (c RDPConnector) plan(connection domain.Connection) (string, Invocation, error) {
 	if connection.Endpoint.Protocol != c.Protocol() {
-		return "", Invocation{}, fmt.Errorf(
+		return Invocation{}, fmt.Errorf(
 			"RDP connector cannot handle protocol %q",
 			connection.Endpoint.Protocol,
 		)
 	}
 	if connection.Endpoint.Host == "" {
-		return "", Invocation{}, fmt.Errorf("RDP connection host cannot be empty")
+		return Invocation{}, fmt.Errorf("RDP connection host cannot be empty")
 	}
 	if connection.Endpoint.Port == 0 {
-		return "", Invocation{}, fmt.Errorf("RDP connection port cannot be zero")
+		return Invocation{}, fmt.Errorf("RDP connection port cannot be zero")
 	}
 
 	options, err := rdpoptions.Decode(connection.Options)
 	if err != nil {
-		return "", Invocation{}, fmt.Errorf("decode RDP options: %w", err)
+		return Invocation{}, fmt.Errorf("decode RDP options: %w", err)
 	}
-
-	clientID := options.Client
-	if clientID == "" {
-		clientID = c.defaultClient
-	}
-	if clientID == "" {
-		return "", Invocation{}, fmt.Errorf("no RDP client is registered for platform %q", runtime.GOOS)
-	}
-	client, ok := c.clients[clientID]
-	if !ok || client == nil {
-		return "", Invocation{}, fmt.Errorf(
-			"RDP client %q is not registered for platform %q",
-			clientID,
-			runtime.GOOS,
-		)
-	}
-	if client.ID() != clientID {
-		return "", Invocation{}, fmt.Errorf(
-			"RDP client registration %q has adapter ID %q",
-			clientID,
-			client.ID(),
-		)
-	}
-	if err := validateRDPClientOptions(clientID, client.Capabilities(), options); err != nil {
-		return "", Invocation{}, err
-	}
-	program := client.Program()
-	if err := validateExecutableName(program); err != nil {
-		return "", Invocation{}, fmt.Errorf("RDP client %q has invalid executable: %w", clientID, err)
-	}
-	args, err := client.Plan(connection, options)
+	program, args, err := platformRDPPlan(connection, options)
 	if err != nil {
-		return "", Invocation{}, fmt.Errorf("plan with RDP client %q: %w", clientID, err)
+		return Invocation{}, err
 	}
-	return clientID, Invocation{Program: program, Args: args}, nil
-}
-
-func validateRDPClientOptions(
-	clientID string,
-	capabilities rdpClientCapabilities,
-	options rdpoptions.Options,
-) error {
-	if options.Fullscreen && !capabilities.Fullscreen {
-		return fmt.Errorf("RDP client %q does not support option %q", clientID, rdpoptions.Fullscreen)
+	if err := validateExecutableName(program); err != nil {
+		return Invocation{}, fmt.Errorf("RDP executable %q is invalid: %w", program, err)
 	}
-	if options.IgnoreCertificate && !capabilities.IgnoreCertificate {
-		return fmt.Errorf("RDP client %q does not support option %q", clientID, rdpoptions.IgnoreCertificate)
-	}
-	return nil
+	return Invocation{Program: program, Args: args}, nil
 }
 
 func (c RDPConnector) Connect(
@@ -150,7 +73,7 @@ func (c RDPConnector) Connect(
 		return err
 	}
 
-	clientID, invocation, err := c.plan(connection)
+	invocation, err := c.Plan(connection)
 	if err != nil {
 		return err
 	}
@@ -159,10 +82,9 @@ func (c RDPConnector) Connect(
 	program, err := c.runner.LookPath(programName)
 	if err != nil {
 		return fmt.Errorf(
-			"%w: executable %q for RDP client %q is not available: %w",
+			"%w: required client %q is not available: %w",
 			ErrClientUnavailable,
 			programName,
-			clientID,
 			err,
 		)
 	}
@@ -185,16 +107,10 @@ func (c RDPConnector) Connect(
 		return err
 	}
 
-	client := c.clients[clientID]
-	transport := client.Capabilities().PasswordTransport
-	if transport != SecretTransportRDPArgsFD {
-		secrets.Clear(secret)
-		return fmt.Errorf("%w for RDP client %q", ErrSecureTransport, clientID)
-	}
 	secureRunner, ok := c.runner.(SecretProcessRunner)
 	if !ok {
 		secrets.Clear(secret)
-		return fmt.Errorf("%w for RDP client %q", ErrSecureTransport, clientID)
+		return fmt.Errorf("%w for RDP", ErrSecureTransport)
 	}
 	if err := validateRDPArgs(invocation.Args); err != nil {
 		secrets.Clear(secret)
@@ -209,7 +125,7 @@ func (c RDPConnector) Connect(
 	}
 	secureInvocation := Invocation{Program: invocation.Program, Args: []string{"/args-from:fd:3"}}
 	if err := secureRunner.RunWithSecret(ctx, secureInvocation, streams, SecretProcessRequest{
-		Transport: transport,
+		Transport: SecretTransportRDPArgsFD,
 		Payload:   payload,
 	}); err != nil {
 		return fmt.Errorf("run %s with keyring password: %w", programName, err)

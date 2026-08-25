@@ -10,30 +10,12 @@ import (
 	"github.com/Alurith/hoplane/internal/rdpoptions"
 )
 
-const xfreerdp3ClientID = "xfreerdp3"
+const rdpProgram = "xfreerdp3"
 
-type xfreerdp3Client struct{}
-
-func (xfreerdp3Client) ID() string {
-	return xfreerdp3ClientID
-}
-
-func (xfreerdp3Client) Program() string {
-	return "xfreerdp3"
-}
-
-func (xfreerdp3Client) Capabilities() rdpClientCapabilities {
-	return rdpClientCapabilities{
-		Fullscreen:        true,
-		IgnoreCertificate: true,
-		PasswordTransport: SecretTransportRDPArgsFD,
-	}
-}
-
-func (xfreerdp3Client) Plan(
+func platformRDPPlan(
 	connection domain.Connection,
 	options rdpoptions.Options,
-) ([]string, error) {
+) (string, []string, error) {
 	address := net.JoinHostPort(
 		connection.Endpoint.Host,
 		strconv.FormatUint(uint64(connection.Endpoint.Port), 10),
@@ -51,5 +33,5 @@ func (xfreerdp3Client) Plan(
 	if options.IgnoreCertificate {
 		args = append(args, "/cert:ignore")
 	}
-	return args, nil
+	return rdpProgram, args, nil
 }

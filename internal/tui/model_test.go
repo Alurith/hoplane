@@ -190,33 +190,6 @@ func TestOptionalFormViewIncludesSkipHelp(t *testing.T) {
 	}
 }
 
-func TestRDPFormUsesLogicalXFREERDP3ClientID(t *testing.T) {
-	form := newAddForm()
-	form.values = formValues{
-		Name:                 "office",
-		Protocol:             "rdp",
-		Host:                 "desktop.example.com",
-		RDPClient:            "xfreerdp3",
-		RDPDomain:            "CONTOSO",
-		RDPFullscreen:        true,
-		RDPIgnoreCertificate: true,
-	}
-
-	candidate, err := form.Candidate()
-	if err != nil {
-		t.Fatalf("Candidate() error = %v", err)
-	}
-	want := domain.Options{"rdp": {
-		"client":             "xfreerdp3",
-		"domain":             "CONTOSO",
-		"fullscreen":         "true",
-		"ignore_certificate": "true",
-	}}
-	if !reflect.DeepEqual(candidate.Options, want) {
-		t.Fatalf("options = %#v, want %#v", candidate.Options, want)
-	}
-}
-
 func TestRDPFormLoadsDomainWhenEditing(t *testing.T) {
 	connection := domain.Connection{
 		Name: "office",
@@ -234,21 +207,6 @@ func TestRDPFormLoadsDomainWhenEditing(t *testing.T) {
 	}
 	if got := candidate.Options["rdp"]["domain"]; got != "CONTOSO" {
 		t.Fatalf("domain = %q, want CONTOSO", got)
-	}
-}
-
-func TestRDPFormRejectsExecutablePathAsClientID(t *testing.T) {
-	form := newAddForm()
-	form.values = formValues{
-		Name:      "office",
-		Protocol:  "rdp",
-		Host:      "desktop.example.com",
-		RDPClient: "/usr/bin/xfreerdp3",
-	}
-
-	_, err := form.Candidate()
-	if err == nil || !strings.Contains(err.Error(), "must be a logical client ID") {
-		t.Fatalf("Candidate() error = %v, want logical client ID rejection", err)
 	}
 }
 

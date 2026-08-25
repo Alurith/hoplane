@@ -91,7 +91,7 @@ func TestAddPersistsRDPOptions(t *testing.T) {
 	err := Execute(context.Background(), []string{
 		"add", "office", "--config", path,
 		"--protocol", "rdp", "--host", "desktop.example.com", "--user", "alice",
-		"--rdp-client", "xfreerdp3", "--rdp-domain", "CONTOSO", "--rdp-fullscreen", "--rdp-ignore-certificate",
+		"--rdp-domain", "CONTOSO", "--rdp-fullscreen", "--rdp-ignore-certificate",
 	}, Dependencies{
 		Input:  bytes.NewBuffer(nil),
 		Output: &bytes.Buffer{},
@@ -107,7 +107,6 @@ func TestAddPersistsRDPOptions(t *testing.T) {
 	}
 	options := file.Connections[0].Options["rdp"]
 	want := map[string]string{
-		"client":             "xfreerdp3",
 		"domain":             "CONTOSO",
 		"fullscreen":         "true",
 		"ignore_certificate": "true",
@@ -129,21 +128,6 @@ func TestAddRejectsEmptyRDPDomain(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), `RDP option "domain" cannot be empty`) {
 		t.Fatalf("add error = %v, want empty domain error", err)
-	}
-}
-
-func TestAddRejectsExecutableLikeRDPClient(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	err := Execute(context.Background(), []string{
-		"add", "office", "--config", path,
-		"--protocol", "rdp", "--host", "desktop.example.com", "--rdp-client", "/usr/bin/xfreerdp3",
-	}, Dependencies{
-		Input:  bytes.NewBuffer(nil),
-		Output: &bytes.Buffer{},
-		Errors: &bytes.Buffer{},
-	})
-	if err == nil || !strings.Contains(err.Error(), "must be a logical client ID") {
-		t.Fatalf("add error = %v, want logical client ID rejection", err)
 	}
 }
 

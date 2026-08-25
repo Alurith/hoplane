@@ -29,7 +29,6 @@ type formValues struct {
 	PasswordAction       string
 	PasswordConfirmation string
 
-	RDPClient            string
 	RDPDomain            string
 	RDPFullscreen        bool
 	RDPIgnoreCertificate bool
@@ -74,7 +73,6 @@ func newEditForm(connection domain.Connection) connectionForm {
 		Tags:        formatTags(connection.Tags),
 	}
 	if options := connection.Options[rdpoptions.Namespace]; options != nil {
-		values.RDPClient = options[rdpoptions.Client]
 		values.RDPDomain = options[rdpoptions.Domain]
 		values.RDPFullscreen, _ = strconv.ParseBool(options[rdpoptions.Fullscreen])
 		values.RDPIgnoreCertificate, _ = strconv.ParseBool(options[rdpoptions.IgnoreCertificate])
@@ -158,11 +156,6 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 	})
 
 	rdpGroup := huh.NewGroup(
-		withSkipHelp(huh.NewInput().
-			Key("rdp_client").
-			Title("Client ID").
-			Description("Leave empty for the platform default (Linux: xfreerdp3).").
-			Value(&shared.RDPClient)),
 		withSkipHelp(huh.NewInput().
 			Key("rdp_domain").
 			Title("Domain").
@@ -334,7 +327,7 @@ func withSkipHelp(field huh.Field) huh.Field {
 
 func optionalField(field string) bool {
 	switch field {
-	case "user", "description", "tags", "password_action", "password", "password_confirmation", "rdp_client", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
+	case "user", "description", "tags", "password_action", "password", "password_confirmation", "rdp_domain", "rdp_fullscreen", "rdp_ignore_certificate":
 		return true
 	default:
 		return false
@@ -431,7 +424,6 @@ func (f connectionForm) options() domain.Options {
 		delete(options, rdpoptions.Namespace)
 	case string(domain.ProtocolRDP):
 		encoded := rdpoptions.Encode(rdpoptions.Options{
-			Client:            strings.TrimSpace(f.values.RDPClient),
 			Domain:            strings.TrimSpace(f.values.RDPDomain),
 			Fullscreen:        f.values.RDPFullscreen,
 			IgnoreCertificate: f.values.RDPIgnoreCertificate,
@@ -560,7 +552,6 @@ func sanitizeFormValues(values formValues) formValues {
 	values.User = terminal.EscapeControls(values.User)
 	values.Description = terminal.EscapeControls(values.Description)
 	values.Tags = terminal.EscapeControls(values.Tags)
-	values.RDPClient = terminal.EscapeControls(values.RDPClient)
 	values.RDPDomain = terminal.EscapeControls(values.RDPDomain)
 	return values
 }

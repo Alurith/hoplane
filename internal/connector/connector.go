@@ -15,7 +15,6 @@ import (
 
 var (
 	ErrUnsupportedProtocol = errors.New("unsupported protocol")
-	ErrDryRunUnsupported   = errors.New("dry-run unsupported")
 	ErrClientUnavailable   = errors.New("required client unavailable")
 	ErrSecureTransport     = errors.New("secure secret transport unavailable")
 )
@@ -27,20 +26,11 @@ type IO struct {
 	Errors io.Writer
 }
 
-type ConnectOptions struct {
-	DryRun bool
-}
-
 // Connector executes a connection for one protocol.
 type Connector interface {
 	Protocol() domain.Protocol
-	Connect(context.Context, domain.Connection, IO) error
-}
-
-// Planner is optionally implemented by connectors that can describe their
-// process invocation without executing it.
-type Planner interface {
 	Plan(domain.Connection) (Invocation, error)
+	Connect(context.Context, domain.Connection, IO) error
 }
 
 // Invocation describes an external process and its arguments.
@@ -125,7 +115,7 @@ func (r Registry) Connect(
 	ctx context.Context,
 	connection domain.Connection,
 	streams IO,
-	options ConnectOptions,
+	dryRun bool,
 ) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -136,16 +126,20 @@ func (r Registry) Connect(
 		return err
 	}
 
-	if options.DryRun {
-		planner, ok := connector.(Planner)
-		if !ok {
-			return fmt.Errorf("%w for protocol %q", ErrDryRunUnsupported, connector.Protocol())
-		}
-		invocation, err := planner.Plan(connection)
+	if dryRun {
+		invocation, err := connector.Plan(connection)
 		if err != nil {
 			return fmt.Errorf("plan connection %q: %w", connection.Name, err)
 		}
-		return WriteDryRun(streams.Output, connection, invocation)
+		if _, err := fmt.Fprintf(
+			streams.Output,
+			"dry-run: connection %q would execute %s\n",
+			connection.Name,
+			invocation,
+		); err != nil {
+			return fmt.Errorf("write dry-run: %w", err)
+		}
+		return nil
 	}
 
 	if err := connector.Connect(ctx, connection, streams); err != nil {

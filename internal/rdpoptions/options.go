@@ -15,16 +15,13 @@ import (
 const Namespace = "rdp"
 
 const (
-	Client            = "client"
 	Domain            = "domain"
 	Fullscreen        = "fullscreen"
 	IgnoreCertificate = "ignore_certificate"
 )
 
-// Options is the RDP-specific interpretation of domain.Options. Client is a
-// logical adapter ID, never an executable name or path supplied by the user.
+// Options is the RDP-specific interpretation of domain.Options.
 type Options struct {
-	Client            string
 	Domain            string
 	Fullscreen        bool
 	IgnoreCertificate bool
@@ -57,11 +54,6 @@ func Decode(all domain.Options) (Options, error) {
 		}
 
 		switch key {
-		case Client:
-			if err := validateClientID(value); err != nil {
-				return Options{}, err
-			}
-			options.Client = value
 		case Domain:
 			options.Domain = value
 		case Fullscreen:
@@ -87,10 +79,7 @@ func Decode(all domain.Options) (Options, error) {
 // representation. False boolean values are omitted because absence has the
 // same meaning as false.
 func Encode(options Options) domain.Options {
-	values := make(map[string]string, 4)
-	if options.Client != "" {
-		values[Client] = options.Client
-	}
+	values := make(map[string]string, 3)
 	if options.Domain != "" {
 		values[Domain] = options.Domain
 	}
@@ -114,18 +103,6 @@ func validateValue(key, value string) error {
 		if r == 0 || unicode.IsControl(r) {
 			return fmt.Errorf("RDP option %q contains a control character", key)
 		}
-	}
-	return nil
-}
-
-func validateClientID(value string) error {
-	for index, r := range value {
-		letter := r >= 'a' && r <= 'z'
-		digit := r >= '0' && r <= '9'
-		if letter || index > 0 && (digit || r == '-') {
-			continue
-		}
-		return fmt.Errorf("RDP option %q must be a logical client ID", Client)
 	}
 	return nil
 }

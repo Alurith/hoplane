@@ -30,20 +30,20 @@ func (s *commandState) connect(ctx context.Context, name string, dryRun bool) er
 		return err
 	}
 
-	return s.connectConnection(ctx, connection, connector.ConnectOptions{DryRun: dryRun})
+	return s.connectConnection(ctx, connection, dryRun)
 }
 
 func (s *commandState) connectConnection(
 	ctx context.Context,
 	connection domain.Connection,
-	options connector.ConnectOptions,
+	dryRun bool,
 ) error {
 	streams := connector.IO{
 		Input:  s.dependencies.Input,
 		Output: s.dependencies.Output,
 		Errors: s.dependencies.Errors,
 	}
-	if err := s.registry.Connect(ctx, connection, streams, options); err != nil {
+	if err := s.registry.Connect(ctx, connection, streams, dryRun); err != nil {
 		return fmt.Errorf("connect %q: %w", connection.Name, err)
 	}
 	return nil

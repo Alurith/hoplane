@@ -19,7 +19,6 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	var user string
 	var description string
 	var tags []string
-	var rdpClient string
 	var rdpDomain string
 	var rdpFullscreen bool
 	var rdpIgnoreCertificate bool
@@ -46,12 +45,11 @@ func (s *commandState) newAddCommand() *cobra.Command {
 				entry.Port = &port
 			}
 
-			connection, err := normalizeEntry(entry, path)
+			connection, err := normalizeCandidate(entry.Candidate(domain.SourceRef{Name: "static", ID: path}), path)
 			if err != nil {
 				return err
 			}
-			rdpFlagsChanged := cmd.Flags().Changed("rdp-client") ||
-				cmd.Flags().Changed("rdp-domain") ||
+			rdpFlagsChanged := cmd.Flags().Changed("rdp-domain") ||
 				cmd.Flags().Changed("rdp-fullscreen") ||
 				cmd.Flags().Changed("rdp-ignore-certificate")
 
@@ -62,14 +60,10 @@ func (s *commandState) newAddCommand() *cobra.Command {
 				}
 			case domain.ProtocolRDP:
 				if rdpFlagsChanged {
-					if cmd.Flags().Changed("rdp-client") && strings.TrimSpace(rdpClient) == "" {
-						return fmt.Errorf("RDP option %q cannot be empty", rdpoptions.Client)
-					}
 					if cmd.Flags().Changed("rdp-domain") && strings.TrimSpace(rdpDomain) == "" {
 						return fmt.Errorf("RDP option %q cannot be empty", rdpoptions.Domain)
 					}
 					entry.Options = rdpoptions.Encode(rdpoptions.Options{
-						Client:            rdpClient,
 						Domain:            rdpDomain,
 						Fullscreen:        rdpFullscreen,
 						IgnoreCertificate: rdpIgnoreCertificate,
@@ -80,12 +74,9 @@ func (s *commandState) newAddCommand() *cobra.Command {
 			}
 
 			connection.Options = domain.CloneOptions(entry.Options)
-			if err := validateProtocolOptions(connection); err != nil {
-				return err
-			}
 			if err := config.Update(cmd.Context(), path, func(file *config.File) error {
-				if connectionNameExists(file.Connections, connection.Name) {
-					return fmt.Errorf("connection %q already exists", connection.Name)
+				if err := checkStaticNameAvailable(*file, connection.Name, -1); err != nil {
+					return err
 				}
 				file.Connections = append(file.Connections, config.EntryFromConnection(connection))
 				return nil
@@ -102,7 +93,6 @@ func (s *commandState) newAddCommand() *cobra.Command {
 	flags.StringVar(&user, "user", "", "optional connection user")
 	flags.StringVar(&description, "description", "", "optional connection description")
 	flags.StringSliceVar(&tags, "tag", nil, "connection tag; may be repeated")
-	flags.StringVar(&rdpClient, "rdp-client", "", "logical RDP client ID (Linux default: xfreerdp3)")
 	flags.StringVar(&rdpDomain, "rdp-domain", "", "RDP authentication domain (for example: CONTOSO or the remote computer name)")
 	flags.BoolVar(&rdpFullscreen, "rdp-fullscreen", false, "start RDP in fullscreen")
 	flags.BoolVar(&rdpIgnoreCertificate, "rdp-ignore-certificate", false, "INSECURE: ignore the RDP server certificate")

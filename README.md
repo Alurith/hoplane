@@ -200,7 +200,6 @@ The `--config` flag also has the short form `-c`.
 --description <text>       Optional description
 --tag <tag>                Connection tag; may be repeated
 
---rdp-client <id>          RDP client identifier
 --rdp-domain <domain>      RDP authentication domain
 --rdp-fullscreen           Start RDP in fullscreen
 --rdp-ignore-certificate  Ignore the RDP server certificate
@@ -284,12 +283,11 @@ RDP options are stored under `options.rdp`:
 
 | Option | Description |
 | --- | --- |
-| `client` | RDP client identifier |
 | `domain` | Authentication domain |
 | `fullscreen` | Start in fullscreen mode |
 | `ignore_certificate` | Disable certificate validation |
 
-On Linux, omitting `client` uses the built-in `xfreerdp3` integration.
+On Linux, RDP connections use the built-in `xfreerdp3` integration.
 
 ## SSH and RDP integration
 

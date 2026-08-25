@@ -53,7 +53,7 @@ func TestNormalizeCandidateUsesDefaultPort(t *testing.T) {
 }
 
 func TestNormalizeCandidateClonesOptions(t *testing.T) {
-	options := Options{"rdp": {"client": "xfreerdp3"}}
+	options := Options{"rdp": {"domain": "CONTOSO"}}
 	connection, err := NormalizeCandidate(Candidate{
 		Name:     "office",
 		Protocol: "rdp",
@@ -64,8 +64,8 @@ func TestNormalizeCandidateClonesOptions(t *testing.T) {
 		t.Fatalf("NormalizeCandidate() error = %v", err)
 	}
 
-	options["rdp"]["client"] = "changed"
-	if got := connection.Options["rdp"]["client"]; got != "xfreerdp3" {
+	options["rdp"]["domain"] = "changed"
+	if got := connection.Options["rdp"]["domain"]; got != "CONTOSO" {
 		t.Fatalf("connection options were not cloned: %q", got)
 	}
 }

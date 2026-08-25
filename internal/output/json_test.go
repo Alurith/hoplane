@@ -23,36 +23,6 @@ func TestRDPOutputReportsEffectiveCertificatePosture(t *testing.T) {
 	}
 }
 
-func TestRDPOutputPreservesLogicalClientIDsWithoutHardcodedFiltering(t *testing.T) {
-	for _, client := range []string{"xfreerdp3", "future-client"} {
-		t.Run(client, func(t *testing.T) {
-			result := FromDomain(domain.Connection{
-				Endpoint: domain.Endpoint{Protocol: domain.ProtocolRDP},
-				Options:  domain.Options{"rdp": {"client": client, "domain": "CONTOSO"}},
-			})
-			if got := result.Options["rdp"]["client"]; got != client {
-				t.Fatalf("client = %q, want %q", got, client)
-			}
-			if got := result.Options["rdp"]["domain"]; got != "CONTOSO" {
-				t.Fatalf("domain = %q, want CONTOSO", got)
-			}
-		})
-	}
-}
-
-func TestRDPOutputDoesNotExposeInvalidExecutableLikeClient(t *testing.T) {
-	result := FromDomain(domain.Connection{
-		Endpoint: domain.Endpoint{Protocol: domain.ProtocolRDP},
-		Options:  domain.Options{"rdp": {"client": "/tmp/rdp-client"}},
-	})
-	if result.Options != nil {
-		t.Fatalf("options = %#v, want invalid options omitted", result.Options)
-	}
-	if result.Security == nil || result.Security.CertificateValidation != "invalid-config" {
-		t.Fatalf("security = %#v, want invalid-config", result.Security)
-	}
-}
-
 func TestWriteList(t *testing.T) {
 	var output bytes.Buffer
 	err := WriteList(&output, []domain.Connection{{

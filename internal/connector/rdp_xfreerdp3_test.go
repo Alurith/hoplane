@@ -28,11 +28,8 @@ func TestLinuxRDPConnectorPlansXFREERDP3Invocations(t *testing.T) {
 			wantArgs: []string{"/v:desktop.example.com:3389", "/u:alice"},
 		},
 		{
-			name: "IPv4 without user and explicit client",
-			host: "192.0.2.10",
-			options: domain.Options{"rdp": {
-				"client": "xfreerdp3",
-			}},
+			name:     "IPv4 without user",
+			host:     "192.0.2.10",
 			wantArgs: []string{"/v:192.0.2.10:3389"},
 		},
 		{
@@ -118,7 +115,7 @@ func TestLinuxRDPConnectorLooksUpXFREERDP3(t *testing.T) {
 func TestLinuxRDPConnectorReportsMissingXFREERDP3(t *testing.T) {
 	runner := &fakeRunner{lookupErr: errors.New("not found")}
 	err := NewRDPConnector(runner).Connect(context.Background(), rdpConnection(), IO{})
-	if !errors.Is(err, ErrClientUnavailable) || !strings.Contains(err.Error(), `executable "xfreerdp3" for RDP client "xfreerdp3" is not available`) {
+	if !errors.Is(err, ErrClientUnavailable) || !strings.Contains(err.Error(), `required client "xfreerdp3" is not available`) {
 		t.Fatalf("Connect() error = %v, want missing xfreerdp3 error", err)
 	}
 	if runner.runCalled {

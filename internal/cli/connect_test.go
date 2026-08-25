@@ -55,7 +55,6 @@ func TestConnectRDPDryRun(t *testing.T) {
 		Host:     "desktop.example.com",
 		User:     "alice",
 		Options: domain.Options{"rdp": {
-			"client":             "xfreerdp3",
 			"domain":             "CONTOSO",
 			"fullscreen":         "true",
 			"ignore_certificate": "true",
@@ -79,31 +78,6 @@ func TestConnectRDPDryRun(t *testing.T) {
 	const want = "dry-run: connection \"office\" would execute xfreerdp3 /v:desktop.example.com:3389 /u:alice /d:CONTOSO /f /cert:ignore\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
-	}
-}
-
-func TestConnectRDPDryRunRejectsUnregisteredClient(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	file := config.NewFile()
-	file.Connections = []config.Entry{{
-		Name:     "office",
-		Protocol: "rdp",
-		Host:     "desktop.example.com",
-		Options:  domain.Options{"rdp": {"client": "other-client"}},
-	}}
-	if err := config.Save(path, file); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	err := Execute(context.Background(), []string{
-		"connect", "office", "--config", path, "--dry-run",
-	}, Dependencies{
-		Input:  strings.NewReader(""),
-		Output: &bytes.Buffer{},
-		Errors: &bytes.Buffer{},
-	})
-	if err == nil || !strings.Contains(err.Error(), `RDP client "other-client" is not registered`) {
-		t.Fatalf("Execute() error = %v, want unregistered client error", err)
 	}
 }
 

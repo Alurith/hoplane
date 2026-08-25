@@ -169,23 +169,16 @@ func ensurePersistedIDs(file *File) error {
 	if file == nil {
 		return fmt.Errorf("configuration cannot be nil")
 	}
-	seen := make(map[string]struct{}, len(file.Connections))
 	for index := range file.Connections {
 		entry := &file.Connections[index]
-		if strings.TrimSpace(entry.ID) == "" {
-			id, err := domain.NewConnectionID()
-			if err != nil {
-				return fmt.Errorf("connection %d: %w", index, err)
-			}
-			entry.ID = id
+		if strings.TrimSpace(entry.ID) != "" {
+			continue
 		}
-		if err := domain.ValidateConnectionID(entry.ID); err != nil {
+		id, err := domain.NewConnectionID()
+		if err != nil {
 			return fmt.Errorf("connection %d: %w", index, err)
 		}
-		if _, exists := seen[entry.ID]; exists {
-			return fmt.Errorf("duplicate connection ID %q", entry.ID)
-		}
-		seen[entry.ID] = struct{}{}
+		entry.ID = id
 	}
 	return nil
 }

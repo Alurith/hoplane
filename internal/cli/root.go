@@ -10,7 +10,6 @@ import (
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/domain"
-	"github.com/Alurith/hoplane/internal/rdpoptions"
 	"github.com/Alurith/hoplane/internal/secrets"
 	"github.com/Alurith/hoplane/internal/selfupdate"
 	"github.com/Alurith/hoplane/internal/tui"
@@ -133,23 +132,9 @@ func (s *commandState) pick(ctx context.Context) error {
 		return fmt.Errorf("run picker: %w", err)
 	}
 	if action == tui.ActionConnect {
-		return s.connectConnection(ctx, connection, connector.ConnectOptions{})
+		return s.connectConnection(ctx, connection, false)
 	}
 	return nil
-}
-
-func connectionNameExists(connections []config.Entry, name string) bool {
-	name = strings.TrimSpace(name)
-	for _, connection := range connections {
-		if strings.TrimSpace(connection.Name) == name {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeEntry(entry config.Entry, sourcePath string) (domain.Connection, error) {
-	return normalizeCandidate(entry.Candidate(domain.SourceRef{Name: "static", ID: sourcePath}), sourcePath)
 }
 
 func normalizeCandidate(candidate domain.Candidate, sourcePath string) (domain.Connection, error) {
@@ -161,27 +146,5 @@ func normalizeCandidate(candidate domain.Candidate, sourcePath string) (domain.C
 		candidate.ID = id
 	}
 	candidate.Source = domain.SourceRef{Name: "static", ID: sourcePath}
-	connection, err := domain.NormalizeCandidate(candidate)
-	if err != nil {
-		return domain.Connection{}, err
-	}
-	if err := validateProtocolOptions(connection); err != nil {
-		return domain.Connection{}, err
-	}
-	return connection, nil
-}
-
-func validateProtocolOptions(connection domain.Connection) error {
-	switch connection.Endpoint.Protocol {
-	case domain.ProtocolSSH:
-		if len(connection.Options) > 0 {
-			return fmt.Errorf("SSH options are not supported")
-		}
-		return nil
-	case domain.ProtocolRDP:
-		_, err := rdpoptions.Decode(connection.Options)
-		return err
-	default:
-		return fmt.Errorf("unsupported protocol %q", connection.Endpoint.Protocol)
-	}
+	return domain.NormalizeCandidate(candidate)
 }

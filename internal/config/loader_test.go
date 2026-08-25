@@ -20,7 +20,6 @@ func TestLoadAndSave(t *testing.T) {
 		Port:     &port,
 		Options: domain.Options{
 			"rdp": {
-				"client":     "xfreerdp3",
 				"fullscreen": "true",
 			},
 		},
@@ -37,7 +36,7 @@ func TestLoadAndSave(t *testing.T) {
 		t.Fatalf("loaded connections = %#v", loaded.Connections)
 	}
 	options := loaded.Connections[0].Options["rdp"]
-	if options["client"] != "xfreerdp3" || options["fullscreen"] != "true" {
+	if options["fullscreen"] != "true" {
 		t.Fatalf("loaded options = %#v", loaded.Connections[0].Options)
 	}
 }
@@ -102,17 +101,6 @@ func TestLoadRejectsNonRDPNamespace(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `options namespace "ssh" is not valid for RDP`) {
 		t.Fatalf("Load() error = %v, want incompatible namespace rejection", err)
-	}
-}
-
-func TestLoadRejectsExecutableLikeRDPClient(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "version: 3\nconnections:\n  - id: 3123456789abcdef0123456789abcdef\n    name: office\n    protocol: rdp\n    host: desktop.example.com\n    options:\n      rdp:\n        client: /usr/bin/xfreerdp3\n"
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "must be a logical client ID") {
-		t.Fatalf("Load() error = %v, want logical client ID rejection", err)
 	}
 }
 

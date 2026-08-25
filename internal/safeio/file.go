@@ -36,23 +36,6 @@ func Validate(path string, policy Policy) error {
 
 // EnsurePrivateDirectory makes an owner-controlled directory private.
 func EnsurePrivateDirectory(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%q: path is not a directory", path)
-	}
-	owned, available := ownerMatchesCurrentUser(path, info)
-	if !available {
-		return fmt.Errorf("%q: %w", path, ErrOwnerUnavailable)
-	}
-	if !owned {
-		return fmt.Errorf("%q: %w", path, ErrWrongOwner)
-	}
-	if err := validatePermissions(path, info, Policy{RejectGroupOtherWrite: true}); err != nil {
-		return err
-	}
 	return ValidateDirectory(path, Policy{RequireOwner: true, RejectGroupOtherWrite: true})
 }
 

@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,14 +55,15 @@ func TestSSHUnavailableBackendDoesNotRunClient(t *testing.T) {
 }
 
 func TestRDPUnavailableBackendDoesNotRunClient(t *testing.T) {
-	runner := &fakeRunner{path: "/usr/bin/test-rdp"}
-	client := &stubRDPClient{id: "test-client", program: "test-rdp", args: []string{"/v:host"}, capabilities: rdpClientCapabilities{PasswordTransport: SecretTransportRDPArgsFD}}
+	if runtime.GOOS != "linux" {
+		t.Skip("xfreerdp3 is currently registered only on Linux")
+	}
+	runner := &fakeRunner{path: "/usr/bin/xfreerdp3"}
 	store := &testSecretStore{lookupErr: secrets.ErrUnavailable}
 	connection := rdpConnection()
 	connection.ID = "0123456789abcdef0123456789abcdef"
-	connector := newRDPConnector(runner, store, client.ID(), map[string]rdpClient{client.ID(): client})
 
-	err := connector.Connect(context.Background(), connection, IO{})
+	err := NewRDPConnector(runner, store).Connect(context.Background(), connection, IO{})
 	if !errors.Is(err, secrets.ErrUnavailable) {
 		t.Fatalf("Connect() error = %v, want ErrUnavailable", err)
 	}
@@ -97,25 +99,5 @@ func TestRDPArgsPayloadValidatesFramingAndIndependentLimit(t *testing.T) {
 	}
 	if err := validateRDPArgs([]string{"/v:host\n/p:injected"}); err == nil {
 		t.Fatal("RDP argument with newline was accepted")
-	}
-}
-
-func TestRDPClientWithoutPasswordTransportFailsBeforeRunner(t *testing.T) {
-	runner := &fakeRunner{path: "/usr/bin/test-rdp"}
-	client := &stubRDPClient{id: "test-client", program: "test-rdp", args: []string{"/v:host"}}
-	store := secrets.NewMemoryStore()
-	connection := rdpConnection()
-	connection.ID = "0123456789abcdef0123456789abcdef"
-	if err := store.Store(context.Background(), secrets.Ref{ConnectionID: connection.ID, Protocol: secrets.ProtocolRDP, Kind: secrets.LoginPassword}, []byte("password")); err != nil {
-		t.Fatal(err)
-	}
-	connector := newRDPConnector(runner, store, client.ID(), map[string]rdpClient{client.ID(): client})
-
-	err := connector.Connect(context.Background(), connection, IO{})
-	if !errors.Is(err, ErrSecureTransport) {
-		t.Fatalf("Connect() error = %v, want ErrSecureTransport", err)
-	}
-	if runner.runCalled || runner.secureCalled {
-		t.Fatal("runner executed without a password transport")
 	}
 }

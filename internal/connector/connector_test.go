@@ -19,6 +19,10 @@ func (f *fakeConnector) Protocol() domain.Protocol {
 	return f.protocol
 }
 
+func (f *fakeConnector) Plan(domain.Connection) (Invocation, error) {
+	return Invocation{}, nil
+}
+
 func (f *fakeConnector) Connect(context.Context, domain.Connection, IO) error {
 	f.calls++
 	return nil
@@ -74,7 +78,7 @@ func TestRegistryRejectsDuplicateProtocols(t *testing.T) {
 	}
 }
 
-func TestRegistryDryRunUsesPlannerWithoutExecutingConnector(t *testing.T) {
+func TestRegistryDryRunUsesPlanWithoutExecutingConnector(t *testing.T) {
 	registry, err := NewRegistry(NewSSHConnector(&fakeRunner{path: "/usr/bin/ssh"}))
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
@@ -93,7 +97,7 @@ func TestRegistryDryRunUsesPlannerWithoutExecutingConnector(t *testing.T) {
 		context.Background(),
 		connection,
 		IO{Output: &output},
-		ConnectOptions{DryRun: true},
+		true,
 	); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -128,7 +132,7 @@ func TestRegistryDryRunRDPUsesXFREERDP3WithoutLookup(t *testing.T) {
 		context.Background(),
 		connection,
 		IO{Output: &output},
-		ConnectOptions{DryRun: true},
+		true,
 	); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -139,22 +143,5 @@ func TestRegistryDryRunRDPUsesXFREERDP3WithoutLookup(t *testing.T) {
 	}
 	if runner.lookedUp != "" || runner.runCalled {
 		t.Fatal("RDP dry-run touched the process runner")
-	}
-}
-
-func TestRegistryDryRunRequiresPlanner(t *testing.T) {
-	registry, err := NewRegistry(&fakeConnector{protocol: domain.ProtocolSSH})
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
-	}
-
-	err = registry.Connect(
-		context.Background(),
-		domain.Connection{Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH}},
-		IO{},
-		ConnectOptions{DryRun: true},
-	)
-	if !errors.Is(err, ErrDryRunUnsupported) {
-		t.Fatalf("Connect() error = %v, want ErrDryRunUnsupported", err)
 	}
 }
