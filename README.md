@@ -45,7 +45,7 @@ and password automation fails closed; native keyring backends are future work.
 
 ## Requirements
 
-- Go `1.26.0` to build Hoplane
+- Go `1.26.9` to build Hoplane
 - `ssh` available in `PATH` for SSH connections
 - `xfreerdp3` available in `PATH` for RDP connections on Linux
 - `/usr/bin/secret-tool` and an unlocked Secret Service keyring for stored passwords
