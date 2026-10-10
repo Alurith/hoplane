@@ -6,6 +6,7 @@ import (
 
 	"github.com/Alurith/hoplane/internal/connector"
 	"github.com/Alurith/hoplane/internal/domain"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +44,19 @@ func (s *commandState) connectConnection(
 		Output: s.dependencies.Output,
 		Errors: s.dependencies.Errors,
 	}
-	if err := s.registry.Connect(ctx, connection, streams, dryRun); err != nil {
+	if !dryRun {
+		s.reportProgramStatus(ansi.ProgramStateWorking, connection.Name)
+	}
+
+	err := s.registry.Connect(ctx, connection, streams, dryRun)
+	if !dryRun {
+		state := ansi.ProgramStateDone
+		if err != nil {
+			state = ansi.ProgramStateError
+		}
+		s.reportProgramStatus(state, connection.Name)
+	}
+	if err != nil {
 		return fmt.Errorf("connect %q: %w", connection.Name, err)
 	}
 	return nil

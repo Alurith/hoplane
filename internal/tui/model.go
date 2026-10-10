@@ -492,6 +492,10 @@ func (m model) View() tea.View {
 	}
 	view := tea.NewView(content)
 	view.AltScreen = true
+	view.ProgramStatus = &tea.ProgramStatus{
+		State: tea.ProgramStateIdle,
+		App:   "hoplane",
+	}
 	return view
 }
 

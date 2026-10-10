@@ -60,6 +60,19 @@ func TestModelConnectsConnection(t *testing.T) {
 	}
 }
 
+func TestModelViewReportsIdleProgramStatus(t *testing.T) {
+	view := NewModel(context.Background(), nil, nil).View()
+	if view.ProgramStatus == nil {
+		t.Fatal("ProgramStatus = nil, want idle status")
+	}
+	if view.ProgramStatus.State != tea.ProgramStateIdle {
+		t.Fatalf("ProgramStatus.State = %q, want idle", view.ProgramStatus.State)
+	}
+	if view.ProgramStatus.App != "hoplane" {
+		t.Fatalf("ProgramStatus.App = %q, want hoplane", view.ProgramStatus.App)
+	}
+}
+
 func TestEditFormPreservesCommaInTags(t *testing.T) {
 	connection := domain.Connection{
 		Name: "nas",

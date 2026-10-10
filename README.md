@@ -22,6 +22,20 @@ simply makes them easier to access.
 - Optional password storage in the system keyring without command-line exposure
 - Verified self-update from GitHub Releases
 - Local YAML configuration
+- OSC 7501 Program Status Protocol support
+
+## Program status
+
+Hoplane reports its connection state using the [OSC 7501 Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status). Compatible terminals can use these reports to show:
+
+- `idle`: the connection picker is open without an active connection
+- `working`: a connection is active
+- `done`: the connection closed normally
+- `error`: the connection closed with an error
+
+Reports identify the application as `hoplane` and include the connection name
+as the record title. Terminals that do not support OSC 7501 ignore these
+reports.
 
 ## Supported platforms
 
@@ -31,7 +45,7 @@ and password automation fails closed; native keyring backends are future work.
 
 ## Requirements
 
-- Go `1.25.13` to build Hoplane
+- Go `1.26.0` to build Hoplane
 - `ssh` available in `PATH` for SSH connections
 - `xfreerdp3` available in `PATH` for RDP connections on Linux
 - `/usr/bin/secret-tool` and an unlocked Secret Service keyring for stored passwords
@@ -45,7 +59,7 @@ Download the matching archive and `checksums.txt` from the
 
 ```bash
 cd ~/Downloads
-VERSION=0.1.1
+VERSION=0.3.0
 ARCHIVE="hoplane_${VERSION}_linux_amd64.tar.gz"
 
 grep "  ${ARCHIVE}$" checksums.txt | sha256sum -c -
@@ -91,8 +105,8 @@ is pushed. The release workflow runs the quality checks first, then builds and
 uploads the archives and `checksums.txt` to GitHub Releases.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 Tags must use the `vMAJOR.MINOR.PATCH` format. The generated archives use the
