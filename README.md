@@ -59,7 +59,7 @@ Download the matching archive and `checksums.txt` from the
 
 ```bash
 cd ~/Downloads
-VERSION=0.3.0
+VERSION=0.3.1
 ARCHIVE="hoplane_${VERSION}_linux_amd64.tar.gz"
 
 grep "  ${ARCHIVE}$" checksums.txt | sha256sum -c -
@@ -105,8 +105,8 @@ is pushed. The release workflow runs the quality checks first, then builds and
 uploads the archives and `checksums.txt` to GitHub Releases.
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
 Tags must use the `vMAJOR.MINOR.PATCH` format. The generated archives use the
