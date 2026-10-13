@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 
 	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
@@ -111,6 +112,9 @@ func (s *commandState) storePassword(ctx context.Context, connection domain.Conn
 		}
 		for _, current := range connections {
 			if current.ID == connection.ID {
+				if current.Endpoint != connection.Endpoint || !reflect.DeepEqual(current.Options, connection.Options) {
+					return fmt.Errorf("connection %q target changed; reload before setting its password", connection.Name)
+				}
 				return s.secretStore.Store(ctx, passwordRef(current), value)
 			}
 		}

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/Alurith/hoplane/internal/config"
@@ -70,11 +71,18 @@ func (e *pickerEditor) Update(
 		if !ok {
 			return fmt.Errorf("static connection %q not found", original.Name)
 		}
+		current, err := normalizeCandidate(file.Connections[index].Candidate(original.Endpoint.Source), path)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(current, original) {
+			return fmt.Errorf("connection %q changed; reload before editing", original.Name)
+		}
 		if err := checkStaticNameAvailable(file, connection.Name, index); err != nil {
 			return err
 		}
-		if original.Endpoint.Protocol != connection.Endpoint.Protocol {
-			if err := e.state.clearPasswordProtocolLocked(ctx, original, string(original.Endpoint.Protocol)); err != nil {
+		if current.Endpoint.Protocol != connection.Endpoint.Protocol {
+			if err := e.state.clearPasswordProtocolLocked(ctx, current, string(current.Endpoint.Protocol)); err != nil {
 				return fmt.Errorf("clear password after protocol change: %w", err)
 			}
 		}
