@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -354,13 +356,24 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 		case tea.KeyPressMsg:
 			text = message.Text
 		}
-		if strings.ContainsAny(text, "\x00\r\n") {
-			f.passwordError = fmt.Errorf("password cannot contain NUL, carriage-return or newline characters")
-			f.clearPassword()
-			return f, nil
-		}
 		if text != "" {
-			f.passwordError = nil
+			max, err := secrets.MaxSecretBytesForProtocol(f.values.Protocol)
+			current := f.values.Password
+			if field.GetKey() == "password_confirmation" {
+				current = f.values.PasswordConfirmation
+			}
+			if err == nil && len(current)+len(text) > max {
+				err = fmt.Errorf("password is too large for %s", f.values.Protocol)
+			}
+			// Bubbles replaces controls and drops RuneError; reject rather than change credentials.
+			if strings.IndexFunc(text, func(r rune) bool { return unicode.IsControl(r) || r == utf8.RuneError }) >= 0 {
+				err = fmt.Errorf("picker cannot accept control or replacement characters in passwords; use secret set instead")
+			}
+			f.passwordError = err
+			if err != nil {
+				f.clearPassword()
+				return f, nil
+			}
 		}
 		formMessage = msg
 	}

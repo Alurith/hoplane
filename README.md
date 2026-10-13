@@ -351,7 +351,10 @@ Use this option only for trusted test environments.
 The keyring is the only persistent password store. Hoplane rejects password
 values containing NUL, carriage-return or newline characters because both the
 FreeRDP argument channel and SSH askpass are line-oriented. SSH passwords are
-limited to 1023 bytes; RDP passwords have a separate 1 MiB limit. Secrets are
+limited to 1023 bytes; RDP passwords have a separate 1 MiB limit. The picker
+rejects control characters and the Unicode replacement character U+FFFD rather
+than letting its input widget change them; use `secret set` for passwords
+containing other permitted bytes. Secrets are
 cleared from application buffers on a best-effort basis; Linux core dumps are
 disabled and dumpability is reduced, but Go/runtime and client copies cannot be
 physically guaranteed away.

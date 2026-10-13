@@ -263,6 +263,40 @@ func TestModelPasswordPasteRejectsLineControls(t *testing.T) {
 	}
 }
 
+func TestModelPasswordRejectsWidgetTransformations(t *testing.T) {
+	for _, content := range []string{"a\tb", "a\x1bb", "a\u0085b", "a\uFFFDb", "a\xffb"} {
+		for _, kind := range []string{"paste", "key"} {
+			t.Run(kind+content, func(t *testing.T) {
+				m := modelFormAt(t, "password")
+				var message tea.Msg = tea.PasteMsg{Content: content}
+				if kind == "key" {
+					message = tea.KeyPressMsg(tea.Key{Text: content})
+				}
+				updated, _ := m.Update(message)
+				m = updated.(model)
+				focusFormField(t, &m, "password_confirmation")
+				updated, _ = m.Update(message)
+				m = updated.(model)
+				change, err := m.form.SecretChange()
+				defer secrets.Clear(change.value)
+				if err == nil || m.status == nil {
+					t.Fatal("widget-altered password was accepted without error")
+				}
+			})
+		}
+	}
+}
+
+func TestModelPasswordRejectsWidgetTruncation(t *testing.T) {
+	m := modelFormAt(t, "password")
+	m.form.values.Protocol = "rdp"
+	updated, _ := m.Update(tea.PasteMsg{Content: strings.Repeat("a", (1<<20)+1)})
+	m = updated.(model)
+	if m.status == nil || m.form.values.Password != "" {
+		t.Fatal("oversized paste was silently truncated")
+	}
+}
+
 func TestModelNonPasswordPasteEscapesControls(t *testing.T) {
 	m := modelFormAt(t, "description")
 	updated, _ := m.Update(tea.PasteMsg{Content: "note\x1b"})
