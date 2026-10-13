@@ -348,7 +348,9 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 			return mutationMsg{err: fmt.Errorf("unknown picker command")}
 		}
 		if err == nil {
-			err = m.applySecretChange(secret, command, original, candidate, connections)
+			if secretErr := m.applySecretChange(secret, command, original, candidate, connections); secretErr != nil {
+				err = fmt.Errorf("connection saved; password update failed: %w", secretErr)
+			}
 		}
 		result := mutationMsg{connections: connections, err: err}
 		if command == commandDeleteConfirm {
@@ -402,7 +404,7 @@ func (m model) applySecretChange(change secretChange, command listCommand, origi
 }
 
 func (m model) updateMutation(message mutationMsg) (tea.Model, tea.Cmd) {
-	if message.err != nil {
+	if message.err != nil && message.connections == nil {
 		m.mode = screenList
 		m.status = message.err
 		return m, nil
@@ -428,7 +430,7 @@ func (m model) updateMutation(message mutationMsg) (tea.Model, tea.Cmd) {
 		selectIndex(&m.list, message.selectIndex, len(items))
 	}
 	m.mode = screenList
-	m.status = nil
+	m.status = message.err
 	return m, command
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -301,6 +302,89 @@ func focusFormField(t *testing.T, m *model, field string) {
 		}
 	}
 	t.Fatalf("could not focus %s", field)
+}
+
+type mutationTestEditor struct {
+	ConnectionEditor
+	connections []domain.Connection
+	configErr   error
+	secretErr   error
+}
+
+func (e mutationTestEditor) Create(context.Context, domain.Candidate) ([]domain.Connection, error) {
+	return e.connections, e.configErr
+}
+func (e mutationTestEditor) Update(context.Context, domain.Connection, domain.Candidate) ([]domain.Connection, error) {
+	return e.connections, e.configErr
+}
+func (e mutationTestEditor) Delete(context.Context, domain.Connection) ([]domain.Connection, error) {
+	return e.connections, e.configErr
+}
+func (e mutationTestEditor) SetPassword(context.Context, domain.Connection, []byte) error {
+	return e.secretErr
+}
+func (e mutationTestEditor) ClearPassword(context.Context, domain.Connection) error {
+	return e.secretErr
+}
+
+func TestMutationSecretFailureKeepsSavedCatalog(t *testing.T) {
+	original := domain.Connection{ID: "0123456789abcdef0123456789abcdef", Name: "nas", Description: "old"}
+	saved := original
+	saved.Description = "saved"
+	secretErr := errors.New("keyring unavailable")
+	for _, test := range []struct {
+		name    string
+		command listCommand
+		clear   bool
+	}{
+		{"create-set", commandAdd, false},
+		{"edit-set", commandEdit, false},
+		{"edit-clear", commandEdit, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			initial := []domain.Connection{original}
+			if test.command == commandAdd {
+				initial = nil
+			}
+			m := NewModel(context.Background(), initial, mutationTestEditor{connections: []domain.Connection{saved}, secretErr: secretErr})
+			change := secretChange{clear: test.clear, set: !test.clear, value: []byte("password")}
+			message := m.mutationCommand(test.command, domain.Candidate{Name: "nas"}, original, "", change)()
+			updated, _ := m.Update(message)
+			result := updated.(model)
+			if len(result.list.Items()) != 1 || result.list.Items()[0].(Item).Connection().Description != "saved" {
+				t.Fatal("saved catalog was discarded after password failure")
+			}
+			if !errors.Is(result.status, secretErr) || !strings.Contains(result.status.Error(), "connection saved; password update failed") {
+				t.Fatalf("partial-success status = %v", result.status)
+			}
+		})
+	}
+}
+
+func TestMutationConfigFailureKeepsOriginalCatalog(t *testing.T) {
+	original := domain.Connection{Name: "nas", Description: "old"}
+	configErr := errors.New("config save failed")
+	m := NewModel(context.Background(), []domain.Connection{original}, mutationTestEditor{configErr: configErr})
+	message := m.mutationCommand(commandEdit, domain.Candidate{Name: "nas"}, original, "", secretChange{})()
+	updated, _ := m.Update(message)
+	result := updated.(model)
+	if len(result.list.Items()) != 1 || result.list.Items()[0].(Item).Connection().Description != "old" {
+		t.Fatal("failed mutation changed the list")
+	}
+	if !errors.Is(result.status, configErr) || strings.Contains(result.status.Error(), "connection saved") {
+		t.Fatalf("config failure status = %v", result.status)
+	}
+}
+
+func TestMutationDeleteLastConnectionRefreshesCatalog(t *testing.T) {
+	original := domain.Connection{Name: "nas"}
+	m := NewModel(context.Background(), []domain.Connection{original}, mutationTestEditor{connections: []domain.Connection{}})
+	message := m.mutationCommand(commandDeleteConfirm, domain.Candidate{}, original, "", secretChange{})()
+	updated, _ := m.Update(message)
+	result := updated.(model)
+	if len(result.list.Items()) != 0 || result.status != nil {
+		t.Fatalf("last connection not removed: %v", result.status)
+	}
 }
 
 func TestModelAppliesMutationSelectionAfterFiltering(t *testing.T) {
