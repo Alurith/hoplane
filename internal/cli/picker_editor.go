@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/domain"
 	"github.com/Alurith/hoplane/internal/secrets"
@@ -25,6 +26,7 @@ func (e *pickerEditor) CanModify(connection domain.Connection) bool {
 
 func (e *pickerEditor) Create(ctx context.Context, candidate domain.Candidate) ([]domain.Connection, error) {
 	candidate.ID = ""
+	var connections []domain.Connection
 	path, err := e.state.path()
 	if err != nil {
 		return nil, err
@@ -38,11 +40,12 @@ func (e *pickerEditor) Create(ctx context.Context, candidate domain.Candidate) (
 			return err
 		}
 		file.Connections = append(file.Connections, config.EntryFromConnection(connection))
-		return nil
+		connections, err = catalog.Build(ctx, *file, path)
+		return err
 	}); err != nil {
 		return nil, err
 	}
-	return e.reload(ctx)
+	return connections, nil
 }
 
 func (e *pickerEditor) Update(
@@ -58,6 +61,7 @@ func (e *pickerEditor) Update(
 		return nil, err
 	}
 	candidate.ID = original.ID
+	var connections []domain.Connection
 	connection, err := normalizeCandidate(candidate, path)
 	if err != nil {
 		return nil, err
@@ -82,6 +86,10 @@ func (e *pickerEditor) Update(
 			return err
 		}
 		file.Connections[index] = config.EntryFromConnection(connection)
+		connections, err = catalog.Build(ctx, file, path)
+		if err != nil {
+			return err
+		}
 		save := func() error { return config.Save(path, file) }
 		if current.Endpoint.Protocol != connection.Endpoint.Protocol {
 			return e.state.deletePasswordsAndSave(ctx, current, []string{string(current.Endpoint.Protocol)}, save)
@@ -90,7 +98,7 @@ func (e *pickerEditor) Update(
 	}); err != nil {
 		return nil, err
 	}
-	return e.reload(ctx)
+	return connections, nil
 }
 
 func (e *pickerEditor) Duplicate(

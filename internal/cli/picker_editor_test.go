@@ -188,6 +188,57 @@ func assertPassword(t *testing.T, store secrets.Store, ref secrets.Ref, want str
 	}
 }
 
+// Cancel once the new endpoint is visible on disk, at the next context check.
+// A post-save reload must not replace or invalidate the committed snapshot.
+type cancelAfterSaveContext struct {
+	context.Context
+	path   string
+	cancel context.CancelFunc
+}
+
+func (c cancelAfterSaveContext) Err() error {
+	file, err := config.Load(c.path)
+	if err == nil {
+		for _, entry := range file.Connections {
+			if entry.Host == "saved.local" {
+				c.cancel()
+				break
+			}
+		}
+	}
+	return c.Context.Err()
+}
+
+func TestPickerEditorReturnsCommittedSnapshot(t *testing.T) {
+	for _, operation := range []string{"create", "update"} {
+		t.Run(operation, func(t *testing.T) {
+			editor, original := testPickerEditor(t)
+			base, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ctx := cancelAfterSaveContext{Context: base, path: editor.state.configPath, cancel: cancel}
+			candidate := testCandidate(original)
+			candidate.Host = "saved.local"
+			var connections []domain.Connection
+			var err error
+			if operation == "create" {
+				candidate.Name = "created"
+				connections, err = editor.Create(ctx, candidate)
+			} else {
+				connections, err = editor.Update(ctx, original, candidate)
+			}
+			if err != nil {
+				t.Fatalf("committed snapshot lost to post-save reload: %v", err)
+			}
+			for _, connection := range connections {
+				if connection.Name == candidate.Name && connection.Endpoint.Host == "saved.local" {
+					return
+				}
+			}
+			t.Fatal("saved connection missing from committed snapshot")
+		})
+	}
+}
+
 func TestPickerEditorRejectsStaleUpdate(t *testing.T) {
 	editor, original := testPickerEditor(t)
 	other := newPickerEditor(editor.state)

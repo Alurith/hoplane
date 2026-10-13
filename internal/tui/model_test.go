@@ -340,9 +340,10 @@ func focusFormField(t *testing.T, m *model, field string) {
 
 type mutationTestEditor struct {
 	ConnectionEditor
-	connections []domain.Connection
-	configErr   error
-	secretErr   error
+	connections    []domain.Connection
+	configErr      error
+	secretErr      error
+	passwordTarget *domain.Connection
 }
 
 func (e mutationTestEditor) Create(context.Context, domain.Candidate) ([]domain.Connection, error) {
@@ -354,7 +355,10 @@ func (e mutationTestEditor) Update(context.Context, domain.Connection, domain.Ca
 func (e mutationTestEditor) Delete(context.Context, domain.Connection) ([]domain.Connection, error) {
 	return e.connections, e.configErr
 }
-func (e mutationTestEditor) SetPassword(context.Context, domain.Connection, []byte) error {
+func (e mutationTestEditor) SetPassword(_ context.Context, target domain.Connection, _ []byte) error {
+	if e.passwordTarget != nil {
+		*e.passwordTarget = target
+	}
 	return e.secretErr
 }
 func (e mutationTestEditor) ClearPassword(context.Context, domain.Connection) error {
@@ -362,7 +366,9 @@ func (e mutationTestEditor) ClearPassword(context.Context, domain.Connection) er
 }
 
 func TestMutationSecretFailureKeepsSavedCatalog(t *testing.T) {
-	original := domain.Connection{ID: "0123456789abcdef0123456789abcdef", Name: "nas", Description: "old"}
+	original := domain.Connection{ID: "0123456789abcdef0123456789abcdef", Name: "nas", Description: "old",
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "nas.local", Port: 22, Source: domain.SourceRef{Name: "static", ID: "config.yaml"}},
+	}
 	saved := original
 	saved.Description = "saved"
 	secretErr := errors.New("keyring unavailable")
@@ -382,7 +388,7 @@ func TestMutationSecretFailureKeepsSavedCatalog(t *testing.T) {
 			}
 			m := NewModel(context.Background(), initial, mutationTestEditor{connections: []domain.Connection{saved}, secretErr: secretErr})
 			change := secretChange{clear: test.clear, set: !test.clear, value: []byte("password")}
-			message := m.mutationCommand(test.command, domain.Candidate{Name: "nas"}, original, "", change)()
+			message := m.mutationCommand(test.command, domain.Candidate{Name: "nas", Protocol: "ssh", Host: "nas.local"}, original, "", change)()
 			updated, _ := m.Update(message)
 			result := updated.(model)
 			if len(result.list.Items()) != 1 || result.list.Items()[0].(Item).Connection().Description != "saved" {
@@ -392,6 +398,27 @@ func TestMutationSecretFailureKeepsSavedCatalog(t *testing.T) {
 				t.Fatalf("partial-success status = %v", result.status)
 			}
 		})
+	}
+}
+
+func TestMutationRejectsReloadedPasswordTarget(t *testing.T) {
+	original := domain.Connection{ID: "0123456789abcdef0123456789abcdef", Name: "nas",
+		Endpoint: domain.Endpoint{Protocol: domain.ProtocolSSH, Host: "trusted.local", User: "alice", Port: 22, Source: domain.SourceRef{Name: "static", ID: "config.yaml"}},
+	}
+	changed := original
+	changed.Endpoint.Host, changed.Endpoint.User = "other.local", "bob"
+	for _, command := range []listCommand{commandAdd, commandEdit} {
+		var storedTarget domain.Connection
+		m := NewModel(context.Background(), []domain.Connection{original}, mutationTestEditor{
+			connections: []domain.Connection{changed}, passwordTarget: &storedTarget,
+		})
+		candidate := domain.Candidate{Name: "nas", Protocol: "ssh", Host: "trusted.local", User: "alice"}
+		message := m.mutationCommand(command, candidate, original, "", secretChange{set: true, value: []byte("alice-password")})()
+		updated, _ := m.Update(message)
+		status := updated.(model).status
+		if storedTarget.ID != "" || status == nil || !strings.Contains(status.Error(), "target changed") {
+			t.Fatalf("password redirected to changed reload target: target=%s, error=%v", storedTarget.Endpoint.Host, status)
+		}
 	}
 }
 

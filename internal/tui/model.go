@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -396,6 +397,15 @@ func (m model) applySecretChange(change secretChange, command listCommand, origi
 	}
 	if target.ID == "" {
 		return fmt.Errorf("saved connection %q not found for secret update", candidate.Name)
+	}
+	candidate.ID = target.ID
+	candidate.Source = target.Endpoint.Source
+	intended, err := domain.NormalizeCandidate(candidate)
+	if err != nil {
+		return err
+	}
+	if intended.Endpoint != target.Endpoint || !reflect.DeepEqual(intended.Options, target.Options) {
+		return fmt.Errorf("connection %q target changed; reload before updating its password", candidate.Name)
 	}
 	if change.clear {
 		return editor.ClearPassword(m.ctx, target)
