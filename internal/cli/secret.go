@@ -3,10 +3,12 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"time"
 
 	"github.com/Alurith/hoplane/internal/catalog"
 	"github.com/Alurith/hoplane/internal/config"
@@ -146,6 +148,50 @@ func (s *commandState) clearPasswordProtocolLocked(ctx context.Context, connecti
 	ref := passwordRef(connection)
 	ref.Protocol = protocol
 	return s.secretStore.Delete(ctx, ref)
+}
+
+// The caller holds the config lock throughout deletion, saving and restoration.
+func (s *commandState) deletePasswordsAndSave(ctx context.Context, connection domain.Connection, protocols []string, save func() error) (result error) {
+	passwords := make(map[secrets.Ref][]byte, len(protocols))
+	defer func() {
+		for _, value := range passwords {
+			secrets.Clear(value)
+		}
+	}()
+	for _, protocol := range protocols {
+		ref := passwordRef(connection)
+		ref.Protocol = protocol
+		value, err := s.secretStore.Lookup(ctx, ref)
+		passwords[ref] = value
+		if err != nil && !errors.Is(err, secrets.ErrNotFound) {
+			return fmt.Errorf("snapshot password before deletion: %w", err)
+		}
+	}
+	defer func() {
+		if result == nil {
+			return
+		}
+		// Cancellation must not prevent restoring credentials already deleted.
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		defer cancel()
+		for ref, value := range passwords {
+			if len(value) == 0 {
+				continue
+			}
+			if err := s.secretStore.Store(restoreCtx, ref, value); err != nil {
+				result = errors.Join(result, fmt.Errorf("restore %s password failed: %w", ref.Protocol, err))
+			}
+		}
+	}()
+	for _, protocol := range protocols {
+		if err := s.clearPasswordProtocolLocked(ctx, connection, protocol); err != nil {
+			return fmt.Errorf("delete %s password: %w", protocol, err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return save()
 }
 
 func readSecret(input io.Reader, output io.Writer, protocol string) ([]byte, error) {

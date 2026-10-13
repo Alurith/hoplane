@@ -364,7 +364,14 @@ already made by libraries and clients.
 Connection IDs are opaque and immutable in YAML and JSON. Renaming a connection
 does not change its keyring entry; duplicating a connection creates a new ID and
 does not copy its password. Deleting a connection also deletes its keyring
-entry. Hoplane rejects older configuration versions; it does not perform an
+entry. If deletion or a protocol-change save fails, Hoplane attempts to restore
+the affected passwords and reports any restoration failure. YAML and the
+keyring are separate stores: SIGKILL, power loss, or an unavailable keyring can
+prevent restoration; these operations are not crash-atomic. The SSH temporary
+password file is unlinked before its first response, but a crash before askpass
+runs can leave it behind.
+
+Hoplane rejects older configuration versions; it does not perform an
 automatic v2 migration.
 
 ## Dry run

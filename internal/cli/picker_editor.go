@@ -81,13 +81,12 @@ func (e *pickerEditor) Update(
 		if err := checkStaticNameAvailable(file, connection.Name, index); err != nil {
 			return err
 		}
-		if current.Endpoint.Protocol != connection.Endpoint.Protocol {
-			if err := e.state.clearPasswordProtocolLocked(ctx, current, string(current.Endpoint.Protocol)); err != nil {
-				return fmt.Errorf("clear password after protocol change: %w", err)
-			}
-		}
 		file.Connections[index] = config.EntryFromConnection(connection)
-		return config.Save(path, file)
+		save := func() error { return config.Save(path, file) }
+		if current.Endpoint.Protocol != connection.Endpoint.Protocol {
+			return e.state.deletePasswordsAndSave(ctx, current, []string{string(current.Endpoint.Protocol)}, save)
+		}
+		return save()
 	}); err != nil {
 		return nil, err
 	}
@@ -147,11 +146,10 @@ func (e *pickerEditor) Delete(ctx context.Context, connection domain.Connection)
 		if !ok {
 			return fmt.Errorf("static connection %q not found", connection.Name)
 		}
-		if err := e.state.clearPasswordLocked(ctx, connection); err != nil {
-			return fmt.Errorf("clear password after delete: %w", err)
-		}
 		file.Connections = append(file.Connections[:index], file.Connections[index+1:]...)
-		return config.Save(path, file)
+		return e.state.deletePasswordsAndSave(ctx, connection, []string{secrets.ProtocolSSH, secrets.ProtocolRDP}, func() error {
+			return config.Save(path, file)
+		})
 	}); err != nil {
 		return nil, err
 	}
