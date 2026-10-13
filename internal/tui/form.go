@@ -54,6 +54,7 @@ type connectionForm struct {
 	original                  domain.Connection
 	values                    formValues
 	liveValues                *formValues
+	passwordError             error
 	passwordInput             *huh.Input
 	passwordConfirmationInput *huh.Input
 }
@@ -346,6 +347,21 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 	}
 	formMessage := sanitizeTextMessage(msg)
 	if field := f.form.GetFocusedField(); field != nil && (field.GetKey() == "password" || field.GetKey() == "password_confirmation") {
+		var text string
+		switch message := msg.(type) {
+		case tea.PasteMsg:
+			text = message.Content
+		case tea.KeyPressMsg:
+			text = message.Text
+		}
+		if strings.ContainsAny(text, "\x00\r\n") {
+			f.passwordError = fmt.Errorf("password cannot contain NUL, carriage-return or newline characters")
+			f.clearPassword()
+			return f, nil
+		}
+		if text != "" {
+			f.passwordError = nil
+		}
 		formMessage = msg
 	}
 	updated, command := f.form.Update(formMessage)
@@ -467,6 +483,9 @@ func (f connectionForm) SecretChange() (secretChange, error) {
 		}
 		return secretChange{clear: true}, nil
 	case passwordActionSet:
+		if f.passwordError != nil {
+			return secretChange{}, f.passwordError
+		}
 		if f.values.Password == "" {
 			return secretChange{}, fmt.Errorf("password cannot be empty")
 		}

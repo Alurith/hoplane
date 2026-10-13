@@ -223,6 +223,86 @@ func TestRDPFormLoadsDomainWhenEditing(t *testing.T) {
 	}
 }
 
+func TestModelPasswordPastePreservesBytes(t *testing.T) {
+	m := modelFormAt(t, "password")
+	const password = "pass\u200Dword"
+	updated, _ := m.Update(tea.PasteMsg{Content: password})
+	m = updated.(model)
+	focusFormField(t, &m, "password_confirmation")
+	updated, _ = m.Update(tea.PasteMsg{Content: password})
+	m = updated.(model)
+	change, err := m.form.SecretChange()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secrets.Clear(change.value)
+	if string(change.value) != password {
+		t.Fatalf("password bytes changed: %q", change.value)
+	}
+}
+
+func TestModelPasswordPasteRejectsLineControls(t *testing.T) {
+	for _, content := range []string{"abc\n", "abc\r", "abc\x00"} {
+		t.Run(content, func(t *testing.T) {
+			m := modelFormAt(t, "password")
+			updated, _ := m.Update(tea.PasteMsg{Content: content})
+			m = updated.(model)
+			focusFormField(t, &m, "password_confirmation")
+			updated, _ = m.Update(tea.PasteMsg{Content: content})
+			m = updated.(model)
+			change, err := m.form.SecretChange()
+			defer secrets.Clear(change.value)
+			if err == nil {
+				t.Fatal("invalid paste became an accepted password")
+			}
+			if m.status == nil {
+				t.Error("invalid paste did not show an error")
+			}
+		})
+	}
+}
+
+func TestModelNonPasswordPasteEscapesControls(t *testing.T) {
+	m := modelFormAt(t, "description")
+	updated, _ := m.Update(tea.PasteMsg{Content: "note\x1b"})
+	if got := updated.(model).form.values.Description; got != `note\x1B` {
+		t.Fatalf("description = %q", got)
+	}
+}
+
+func modelFormAt(t *testing.T, field string) model {
+	t.Helper()
+	m := NewModel(context.Background(), nil, nil)
+	m.mode = screenConnectionForm
+	m.form = newConnectionForm(formAdd, domain.Connection{}, formValues{
+		Name: "nas", Protocol: "ssh", Host: "nas.local", PasswordAction: passwordActionSet,
+	})
+	m.form.form.Init()
+	focusFormField(t, &m, field)
+	return m
+}
+
+func focusFormField(t *testing.T, m *model, field string) {
+	t.Helper()
+	groupField := "password"
+	if field == "description" {
+		groupField = "user"
+	}
+	for range 5 {
+		focused := m.form.form.GetFocusedField()
+		if focused.GetKey() == field {
+			focused.Focus()
+			return
+		}
+		if focused.GetKey() == groupField {
+			m.form.form.NextField()
+		} else {
+			m.form.form.NextGroup()
+		}
+	}
+	t.Fatalf("could not focus %s", field)
+}
+
 func TestModelAppliesMutationSelectionAfterFiltering(t *testing.T) {
 	initial := NewModel(context.Background(), []domain.Connection{{
 		Name:     "nas",

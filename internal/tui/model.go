@@ -91,7 +91,9 @@ func NewModel(ctx context.Context, connections []domain.Connection, editor Conne
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	msg = sanitizeTextMessage(msg)
+	if m.mode != screenConnectionForm {
+		msg = sanitizeTextMessage(msg)
+	}
 	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.list.SetSize(message.Width, message.Height)
@@ -244,6 +246,7 @@ func (m model) selectedItem() (domain.Connection, bool) {
 func (m model) updateConnectionForm(message tea.Msg) (model, tea.Cmd) {
 	var command tea.Cmd
 	m.form, command = m.form.Update(message)
+	m.status = m.form.passwordError
 	return m.submitConnectionForm(command)
 }
 
