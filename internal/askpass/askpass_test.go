@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,6 +26,8 @@ func TestIsPasswordPromptAcceptsOpenSSHGrammar(t *testing.T) {
 	for _, prompt := range []string{
 		"alice@example.com's password:",
 		"alice@example.com's password: ",
+		"alice@example.org@desktop.example.com's password:",
+		"alice@example.org@desktop.example.com's password: ",
 		"alice@192.0.2.10's password:",
 		"alice@[2001:db8::10]'s password:",
 		"DOMAIN\\alice@desktop.example.com's password:",
@@ -45,7 +49,8 @@ func TestIsPasswordPromptRejectsAmbiguousPrompt(t *testing.T) {
 		" alice@example.com's password:",
 		"alice@example.com's password:  ",
 		"alice@example.com's password:\t",
-		"alice@@example.com's password:",
+		"@example.com's password:",
+		"alice@'s password:",
 		"alice@example.com's password:\n",
 		"alice@example.com's password:\r",
 		"alice@example.com's password:\x00",
@@ -102,6 +107,65 @@ func TestRunPropagatesReaderErrorWithoutWriting(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatalf("output = %q, want empty", output.String())
 	}
+}
+
+func TestRunConsumesSecretFileOnce(t *testing.T) {
+	path, output := askpassFiles(t)
+	if err := Run([]string{"alice@example.com's password:"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("secret still exists: %v", err)
+	}
+	if err := Run([]string{"alice@example.com's password:"}); err == nil {
+		t.Error("second Run() succeeded")
+	}
+	if _, err := output.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "test-secret\n" {
+		t.Errorf("response = %q, want one response", got)
+	}
+}
+
+func TestRunUnsupportedPromptPreservesSecretFile(t *testing.T) {
+	path, output := askpassFiles(t)
+	if err := Run([]string{"Enter OTP:"}); err == nil {
+		t.Fatal("Run() accepted an OTP prompt")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "test-secret" {
+		t.Fatalf("secret changed: %v", err)
+	}
+	info, err := output.Stat()
+	if err != nil || info.Size() != 0 {
+		t.Fatalf("unsupported prompt produced output: %v", err)
+	}
+}
+
+func askpassFiles(t *testing.T) (string, *os.File) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret")
+	if err := os.WriteFile(path, []byte("test-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(askpassSecretFileEnv, path)
+	output, err := os.Create(filepath.Join(dir, "output"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stdout
+	os.Stdout = output
+	t.Cleanup(func() {
+		os.Stdout = original
+		_ = output.Close()
+	})
+	return path, output
 }
 
 type failingReader struct{}

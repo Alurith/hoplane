@@ -25,6 +25,9 @@ func Run(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("askpass requires exactly one prompt")
 	}
+	if !isPasswordPrompt(args[0]) {
+		return fmt.Errorf("unsupported askpass prompt")
+	}
 	path := os.Getenv(askpassSecretFileEnv)
 	if path == "" {
 		return fmt.Errorf("askpass secret file is unavailable")
@@ -34,6 +37,9 @@ func Run(args []string) error {
 		return fmt.Errorf("open askpass secret: %w", err)
 	}
 	defer file.Close()
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("consume askpass secret: %w", err)
+	}
 	return run(args[0], file, os.Stdout)
 }
 
@@ -75,10 +81,10 @@ func isPasswordPrompt(prompt string) bool {
 		return false
 	}
 	prefix := prompt[:len(prompt)-len(suffix)]
-	if strings.Count(prefix, "@") != 1 {
+	at := strings.LastIndexByte(prefix, '@')
+	if at < 0 {
 		return false
 	}
-	at := strings.IndexByte(prefix, '@')
 	return validPromptToken(prefix[:at]) && validPromptToken(prefix[at+1:])
 }
 
@@ -87,7 +93,7 @@ func validPromptToken(token string) bool {
 		return false
 	}
 	for _, r := range token {
-		if r == '@' || r == '\'' || unicode.IsSpace(r) || !unicode.IsPrint(r) {
+		if r == '\'' || unicode.IsSpace(r) || !unicode.IsPrint(r) {
 			return false
 		}
 	}
