@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -216,8 +217,8 @@ func readSecret(input io.Reader, output io.Writer, protocol string) ([]byte, err
 		return value, nil
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(input, int64(max)+1))
-	if err != nil {
+	raw, err := bufio.NewReader(io.LimitReader(input, int64(max)+2)).ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
 		secrets.Clear(raw)
 		return nil, fmt.Errorf("read password: %w", err)
 	}
@@ -225,14 +226,6 @@ func readSecret(input io.Reader, output io.Writer, protocol string) ([]byte, err
 	if bytes.HasSuffix(value, []byte("\n")) {
 		value = value[:len(value)-1]
 		if bytes.HasSuffix(value, []byte("\r")) {
-			value = value[:len(value)-1]
-		}
-	} else if len(value) == max+1 && bytes.HasSuffix(value, []byte("\r")) {
-		// A max-sized password followed by CRLF fills the max+1 sentinel
-		// before the LF can be read. Consume that one explicit terminator byte.
-		var terminator [1]byte
-		n, _ := input.Read(terminator[:])
-		if n == 1 && terminator[0] == '\n' {
 			value = value[:len(value)-1]
 		}
 	}

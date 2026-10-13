@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Alurith/hoplane/internal/config"
 	"github.com/Alurith/hoplane/internal/output"
@@ -26,6 +29,84 @@ func TestReadSecretAcceptsMaxSizedCRLFLine(t *testing.T) {
 		t.Fatalf("readSecret() length = %d, want %d", len(value), secrets.MaxSSHAskpassBytes)
 	}
 }
+
+func TestReadSecretReturnsAfterNewline(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+	type result struct {
+		value []byte
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := readSecret(reader, io.Discard, secrets.ProtocolSSH)
+		done <- result{value, err}
+	}()
+	if _, err := writer.Write([]byte("password\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		defer secrets.Clear(got.value)
+		if got.err != nil || string(got.value) != "password" {
+			t.Fatalf("readSecret() error = %v", got.err)
+		}
+	case <-time.After(time.Second):
+		_ = writer.Close()
+		got := <-done
+		secrets.Clear(got.value)
+		t.Fatal("readSecret() waited for EOF after a complete line")
+	}
+}
+
+func TestReadSecretBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		protocol string
+		max      int
+	}{
+		{secrets.ProtocolSSH, 1023}, {secrets.ProtocolRDP, 1 << 20},
+	} {
+		t.Run(test.protocol, func(t *testing.T) {
+			for _, terminator := range []string{"", "\n", "\r\n"} {
+				password := strings.Repeat("a", test.max)
+				value, err := readSecret(strings.NewReader(password+terminator), io.Discard, test.protocol)
+				if err != nil || string(value) != password {
+					t.Errorf("maximum password with terminator %q: %v", terminator, err)
+				}
+				secrets.Clear(value)
+				value, err = readSecret(strings.NewReader(password+"a"+terminator), io.Discard, test.protocol)
+				if err == nil || len(value) != 0 {
+					t.Errorf("oversized password with terminator %q accepted", terminator)
+				}
+				secrets.Clear(value)
+			}
+			for _, input := range []string{"", "\n", "\r\n", "a\x00b\n", "a\rb\n", "password\r"} {
+				value, err := readSecret(strings.NewReader(input), io.Discard, test.protocol)
+				secrets.Clear(value)
+				if err == nil || len(value) != 0 {
+					t.Errorf("invalid input %q accepted", input)
+				}
+			}
+		})
+	}
+	value, err := readSecret(strings.NewReader("first\nsecond\n"), io.Discard, secrets.ProtocolSSH)
+	defer secrets.Clear(value)
+	if err != nil || string(value) != "first" {
+		t.Errorf("did not read only the first line: %v", err)
+	}
+}
+
+func TestReadSecretPropagatesInputError(t *testing.T) {
+	value, err := readSecret(secretErrorReader{}, io.Discard, secrets.ProtocolSSH)
+	defer secrets.Clear(value)
+	if !errors.Is(err, io.ErrUnexpectedEOF) || len(value) != 0 {
+		t.Fatalf("input error lost: %v", err)
+	}
+}
+
+type secretErrorReader struct{}
+
+func (secretErrorReader) Read(p []byte) (int, error) { p[0] = 'a'; return 1, io.ErrUnexpectedEOF }
 
 func TestSecretCommandsManageSSHPasswordWithoutPrintingIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
