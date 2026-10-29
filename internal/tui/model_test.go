@@ -96,7 +96,7 @@ func TestEditFormPreservesCommaInTags(t *testing.T) {
 
 func TestConnectionFormKeepsPasswordOutOfCandidate(t *testing.T) {
 	form := newAddForm()
-	form.values = formValues{
+	*form.values = formValues{
 		Name:                 "office",
 		Protocol:             "rdp",
 		Host:                 "desktop.example.com",

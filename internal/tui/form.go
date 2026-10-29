@@ -54,8 +54,7 @@ type connectionForm struct {
 	form                      *huh.Form
 	mode                      formMode
 	original                  domain.Connection
-	values                    formValues
-	liveValues                *formValues
+	values                    *formValues
 	passwordError             error
 	passwordInput             *huh.Input
 	passwordConfirmationInput *huh.Input
@@ -137,7 +136,6 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		Title("New password").
 		Description("Enter the new password.").
 		EchoMode(huh.EchoModePassword).
-		// CharLimit is only a UI guard; every submit path validates by protocol.
 		CharLimit(secrets.MaxRDPPasswordBytes).
 		Value(&shared.Password)
 	passwordConfirmationInput := huh.NewInput().
@@ -145,7 +143,6 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		Title("Confirm password").
 		Description("Enter the new password again.").
 		EchoMode(huh.EchoModePassword).
-		// CharLimit is only a UI guard; every submit path validates by protocol.
 		CharLimit(secrets.MaxRDPPasswordBytes).
 		Value(&shared.PasswordConfirmation)
 	secretActionGroup := huh.NewGroup(
@@ -196,8 +193,7 @@ func newConnectionForm(mode formMode, original domain.Connection, values formVal
 		form:                      form,
 		mode:                      mode,
 		original:                  original,
-		values:                    values,
-		liveValues:                shared,
+		values:                    shared,
 		passwordInput:             passwordInput,
 		passwordConfirmationInput: passwordConfirmationInput,
 	}
@@ -280,12 +276,6 @@ func required(field string) func(string) error {
 	}
 }
 
-func (f *connectionForm) syncValues() {
-	if f.liveValues != nil {
-		f.values = *f.liveValues
-	}
-}
-
 func (f connectionForm) SkipOptional() (connectionForm, tea.Cmd, bool) {
 	if f.form == nil {
 		return f, nil, false
@@ -295,7 +285,6 @@ func (f connectionForm) SkipOptional() (connectionForm, tea.Cmd, bool) {
 		return f, nil, false
 	}
 	command := f.form.NextGroup()
-	f.syncValues()
 	return f, command, true
 }
 
@@ -344,9 +333,6 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 	if keyPress, ok := msg.(tea.KeyPressMsg); ok && keyPress.String() == "ctrl+v" {
 		return f, nil
 	}
-	if f.liveValues != nil {
-		*f.liveValues = f.values
-	}
 	formMessage := sanitizeTextMessage(msg)
 	if field := f.form.GetFocusedField(); field != nil && (field.GetKey() == "password" || field.GetKey() == "password_confirmation") {
 		var text string
@@ -381,7 +367,6 @@ func (f connectionForm) Update(msg tea.Msg) (connectionForm, tea.Cmd) {
 	if form, ok := updated.(*huh.Form); ok {
 		f.form = form
 	}
-	f.syncValues()
 	f.sanitizeValues()
 	if f.values.PasswordAction != passwordActionSet {
 		f.clearPassword()
@@ -517,24 +502,22 @@ func (f connectionForm) SecretChange() (secretChange, error) {
 }
 
 func (f *connectionForm) clearPassword() {
+	if f.values == nil {
+		return
+	}
 	f.values.Password = ""
 	f.values.PasswordConfirmation = ""
-	if f.liveValues != nil {
-		f.liveValues.Password = ""
-		f.liveValues.PasswordConfirmation = ""
-		if f.passwordInput != nil {
-			f.passwordInput.Value(&f.liveValues.Password)
-		}
-		if f.passwordConfirmationInput != nil {
-			f.passwordConfirmationInput.Value(&f.liveValues.PasswordConfirmation)
-		}
+	if f.passwordInput != nil {
+		f.passwordInput.Value(&f.values.Password)
+	}
+	if f.passwordConfirmationInput != nil {
+		f.passwordConfirmationInput.Value(&f.values.PasswordConfirmation)
 	}
 }
 
 func (f *connectionForm) dispose() {
 	f.clearPassword()
 	f.form = nil
-	f.liveValues = nil
 	f.passwordInput = nil
 	f.passwordConfirmationInput = nil
 }
@@ -547,18 +530,15 @@ func (f connectionForm) View() string {
 	if f.form == nil {
 		return ""
 	}
-	if f.liveValues != nil {
-		*f.liveValues = sanitizeFormValues(f.values)
-	}
+	f.sanitizeValues()
 	return f.form.View()
 }
 
 func (f *connectionForm) sanitizeValues() {
-	if f.liveValues == nil {
+	if f.values == nil {
 		return
 	}
-	f.values = sanitizeFormValues(f.values)
-	*f.liveValues = f.values
+	*f.values = sanitizeFormValues(*f.values)
 }
 
 func sanitizeTextMessage(message tea.Msg) tea.Msg {

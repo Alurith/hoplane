@@ -101,11 +101,11 @@ func updateParsed(
 	backend backend,
 	executablePath func() (string, error),
 ) (Result, error) {
-	candidate, result, err := latest(ctx, parsedCurrent, backend)
+	candidate, parsedLatest, result, err := latest(ctx, parsedCurrent, backend)
 	if err != nil {
 		return Result{}, err
 	}
-	if !semver.MustParse(result.LatestVersion).GreaterThan(parsedCurrent) {
+	if !parsedLatest.GreaterThan(parsedCurrent) {
 		return result, nil
 	}
 
@@ -122,11 +122,11 @@ func updateParsed(
 	}
 	defer releaseLock()
 
-	candidate, result, err = latest(ctx, parsedCurrent, backend)
+	candidate, parsedLatest, result, err = latest(ctx, parsedCurrent, backend)
 	if err != nil {
 		return Result{}, err
 	}
-	if !semver.MustParse(result.LatestVersion).GreaterThan(parsedCurrent) {
+	if !parsedLatest.GreaterThan(parsedCurrent) {
 		return result, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -146,19 +146,19 @@ func latest(
 	ctx context.Context,
 	parsedCurrent *semver.Version,
 	backend backend,
-) (releaseCandidate, Result, error) {
+) (releaseCandidate, *semver.Version, Result, error) {
 	candidate, found, err := backend.detectLatest(ctx)
 	if err != nil {
-		return releaseCandidate{}, Result{}, fmt.Errorf("detect latest release: %w", err)
+		return releaseCandidate{}, nil, Result{}, fmt.Errorf("detect latest release: %w", err)
 	}
 	if !found {
-		return releaseCandidate{}, Result{}, ErrReleaseNotFound
+		return releaseCandidate{}, nil, Result{}, ErrReleaseNotFound
 	}
 	parsedLatest, err := semver.NewVersion(candidate.version)
 	if err != nil {
-		return releaseCandidate{}, Result{}, fmt.Errorf("invalid release version %q: %w", candidate.version, err)
+		return releaseCandidate{}, nil, Result{}, fmt.Errorf("invalid release version %q: %w", candidate.version, err)
 	}
-	return candidate, Result{
+	return candidate, parsedLatest, Result{
 		CurrentVersion: parsedCurrent.String(),
 		LatestVersion:  parsedLatest.String(),
 	}, nil

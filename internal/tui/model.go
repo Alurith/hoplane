@@ -349,7 +349,7 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 			return mutationMsg{err: fmt.Errorf("unknown picker command")}
 		}
 		if err == nil {
-			if secretErr := m.applySecretChange(secret, command, original, candidate, connections); secretErr != nil {
+			if secretErr := m.applySecretChange(secret, original, candidate, connections); secretErr != nil {
 				err = fmt.Errorf("connection saved; password update failed: %w", secretErr)
 			}
 		}
@@ -366,7 +366,7 @@ func (m model) mutationCommand(command listCommand, candidate domain.Candidate, 
 	}
 }
 
-func (m model) applySecretChange(change secretChange, command listCommand, original domain.Connection, candidate domain.Candidate, connections []domain.Connection) error {
+func (m model) applySecretChange(change secretChange, original domain.Connection, candidate domain.Candidate, connections []domain.Connection) error {
 	if !change.set && !change.clear {
 		return nil
 	}
@@ -374,10 +374,6 @@ func (m model) applySecretChange(change secretChange, command listCommand, origi
 	if !ok {
 		return fmt.Errorf("secret editor is not configured")
 	}
-	if command == commandDeleteConfirm {
-		return editor.ClearPassword(m.ctx, original)
-	}
-
 	var target domain.Connection
 	if original.ID != "" {
 		for _, connection := range connections {
@@ -482,7 +478,7 @@ func (m *model) applyPendingSelection() {
 }
 
 func reopenConnectionForm(form connectionForm) connectionForm {
-	return newConnectionForm(form.mode, form.original, form.values)
+	return newConnectionForm(form.mode, form.original, *form.values)
 }
 
 func (m model) View() tea.View {

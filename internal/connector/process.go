@@ -133,7 +133,6 @@ func (ExecRunner) RunWithSecret(
 		if err != nil {
 			return err
 		}
-		// Cleanup is handled by the deferred error-reporting cleanup above.
 	case SecretTransportRDPArgsFD:
 		reader, writer, err = os.Pipe()
 		if err != nil {
@@ -167,13 +166,10 @@ func (ExecRunner) RunWithSecret(
 	if err != nil {
 		return fmt.Errorf("configure secure process: %w", err)
 	}
-	switch request.Transport {
-	case SecretTransportSSHAskpass:
+	if request.Transport == SecretTransportSSHAskpass {
 		if err := configureAskpass(command, askpassSecretPath); err != nil {
 			return err
 		}
-	case SecretTransportRDPArgsFD:
-		// The payload validator already checked the RDP framing.
 	}
 	command.WaitDelay = secureCommandWaitDelay
 
